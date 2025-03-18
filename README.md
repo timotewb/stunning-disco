@@ -4,7 +4,7 @@ A sandbox repository for storing and versioning resources across various technol
 
 ## Simple RAG
 
-This repo stores code to build a simple RAG pipeline storing and querying data from a vector store running in Docker. Everything is locally run using ollama, docker and python scripts.
+This repo builds on the `simple-rag` branch by focusing on the data processing required to get good embeddings in the database.
 
 ![Diagram](public/rag-ollama-diagram.png)
 Credit: [link](https://weaviate.io/blog/local-rag-with-ollama-and-weaviate)
@@ -15,7 +15,6 @@ Credit: [link](https://weaviate.io/blog/local-rag-with-ollama-and-weaviate)
 2. Install Python Dependencies
 3. Install Ollama and models (e.g. llama2 & all-minilm) `ollama pull llama2` `ollama pull all-minilm`
 4. Start the vector database container `docker run -p 8080:8080 -p 50051:50051 cr.weaviate.io/semitechnologies/weaviate:1.24.8`
+5. Download data `get_data.ipynb`
 
 ## Resources
-
-Interesting article on [Evaluation Metrics](https://weaviate.io/blog/retrieval-evaluation-metrics)
