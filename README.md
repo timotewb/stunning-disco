@@ -15,3 +15,7 @@ Credit: [link](https://weaviate.io/blog/local-rag-with-ollama-and-weaviate)
 2. Install Python Dependencies
 3. Install Ollama and models (e.g. llama2 & all-minilm) `ollama pull llama2` `ollama pull all-minilm`
 4. Start the vector database container `docker run -p 8080:8080 -p 50051:50051 cr.weaviate.io/semitechnologies/weaviate:1.24.8`
+
+## Resources
+
+Interesting article on [Evaluation Metrics](https://weaviate.io/blog/retrieval-evaluation-metrics)
