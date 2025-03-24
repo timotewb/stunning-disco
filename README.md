@@ -13,8 +13,13 @@ Credit: [link](https://weaviate.io/blog/local-rag-with-ollama-and-weaviate)
 
 1. Install Pyenv & Python
 2. Install Python Dependencies
-3. Install Ollama and models (e.g. llama2 & all-minilm) `ollama pull llama2` `ollama pull all-minilm`
+3. Install Ollama and models (e.g. llama3) `ollama pull llama3`
 4. Start the vector database container `docker run -p 8080:8080 -p 50051:50051 cr.weaviate.io/semitechnologies/weaviate:1.24.8`
-5. Download data `get_data.ipynb`
+5. Start the parser `docker run -p 5010:5001 ghcr.io/nlmatics/nlm-ingestor:latest`
+6. Download data `get_data.ipynb`
+7. Process raw data `chunk_data.ipynb`
 
 ## Resources
+
+https://www.llamaindex.ai/blog/mastering-pdfs-extracting-sections-headings-paragraphs-and-tables-with-cutting-edge-parser-faea18870125
+https://github.com/nlmatics/nlm-ingestor

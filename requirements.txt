@@ -4,3 +4,6 @@ llama-index-llms-ollama==0.5.3
 llama-index-embeddings-huggingface==0.5.2
 llama-parse==0.6.4.post1
 weaviate-client==4.11.1
+llmsherpa==0.1.4
+pymupdf4llm==0.0.17
+PyMuPDF==1.25.4
