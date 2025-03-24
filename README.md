@@ -23,3 +23,5 @@ Credit: [link](https://weaviate.io/blog/local-rag-with-ollama-and-weaviate)
 
 https://www.llamaindex.ai/blog/mastering-pdfs-extracting-sections-headings-paragraphs-and-tables-with-cutting-edge-parser-faea18870125
 https://github.com/nlmatics/nlm-ingestor
+
+[Chunking](https://github.com/xbeat/Machine-Learning/blob/main/Optimizing%20RAG%20with%20Document%20Chunking%20Techniques%20Using%20Python.md)
