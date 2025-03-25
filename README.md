@@ -17,7 +17,7 @@ Credit: [link](https://weaviate.io/blog/local-rag-with-ollama-and-weaviate)
 4. Start the vector database container `docker run -p 8080:8080 -p 50051:50051 cr.weaviate.io/semitechnologies/weaviate:1.24.8`
 5. Start the parser `docker run -p 5010:5001 ghcr.io/nlmatics/nlm-ingestor:latest`
 6. Download data `get_data.ipynb`
-7. Process raw data `chunk_data.ipynb`
+7. Process raw data `preprocess_data.ipynb`
 
 ## Resources
 

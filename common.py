@@ -2,6 +2,21 @@ import os
 import shutil
 
 def create_folder(folder_path: str) -> None:
+    """
+    Create a folder at the specified path if it does not already exist. Parent folders will be created if necessary.
+
+    Args:
+        folder_path (str): The path of the folder to create.
+
+    Returns:
+        None
+
+    Prints:
+        A message indicating whether the folder was created or already exists.
+
+    Raises:
+        Exception: If an error occurs during folder creation.
+    """
     try:
         os.makedirs(folder_path, exist_ok=True)
         print(f"Folder '{folder_path}' has been created (or already exists).")
@@ -9,6 +24,25 @@ def create_folder(folder_path: str) -> None:
         print(f"An error occurred while creating the folder: {e}")
 
 def clear_folder(folder_path: str) -> None:
+    """
+    Clear all contents of the specified folder. Deletes files, symbolic links, 
+    and subdirectories within the specified folder. Files in parent directories
+    are not affected.
+
+    Args:
+        folder_path (str): The path of the folder to clear.
+
+    Returns:
+        None
+
+    Prints:
+        A message indicating whether the folder's contents were cleared or if 
+        the folder does not exist.
+
+    Raises:
+        FileNotFoundError: If the folder does not exist.
+        Exception: If an error occurs while clearing the folder.
+    """
     try:
         for filename in os.listdir(folder_path):
             file_path = os.path.join(folder_path, filename)
