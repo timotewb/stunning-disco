@@ -1,4 +1,5 @@
 import re
+from typing import List
 import nltk
 nltk.download('punkt')
 
@@ -68,10 +69,10 @@ def fixed_size_chunking_with_overlap(text, chunk_size, overlap):
     
     return chunks
 
-def sentence_based_chunking(text, max_sentences):
-    sentences = nltk.sent_tokenize(text)
-    chunks = []
-    current_chunk = []
+def sentence_based_chunking(text: str, max_sentences: int) -> List[str]:
+    sentences: List[str] = nltk.sent_tokenize(text)
+    chunks: List[str] = []
+    current_chunk: List[str] = []
     
     for sentence in sentences:
         if len(current_chunk) < max_sentences:

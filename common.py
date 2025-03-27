@@ -1,5 +1,7 @@
 import os
 import shutil
+from typing import LiteralString
+from cleantext import clean
 
 def create_folder(folder_path: str) -> None:
     """
@@ -55,3 +57,9 @@ def clear_folder(folder_path: str) -> None:
         print(f"Folder '{folder_path}' does not exist.")
     except Exception as e:
         print(f"An error occurred while clearing the folder: {e}")
+
+
+def clean_text(t: str) -> str:
+    cleaned_text = clean(t, extra_spaces=True)
+    cleaned_text: LiteralString = "\n".join([line for line in cleaned_text.splitlines() if line.strip()])
+    return cleaned_text

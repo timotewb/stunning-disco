@@ -26,3 +26,5 @@ https://github.com/nlmatics/nlm-ingestor
 
 [Chunking](https://github.com/xbeat/Machine-Learning/blob/main/Optimizing%20RAG%20with%20Document%20Chunking%20Techniques%20Using%20Python.md)
 [Using Vector Store Index with Existing Weaviate Vector Store](https://docs.llamaindex.ai/en/stable/examples/vector_stores/existing_data/weaviate_existing_data/)
+
+https://docs.ragas.io/en/latest/howtos/integrations/langchain/#evaluate
