@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+set -e
+
+echo "Installing dependencies"
+sudo apt update
+sudo apt install swig -y
+echo "swig installed successfully."
+sudo apt install python-dev-is-python3 python3-dev -y
+sudo apt install python3-setuptools -y
+echo "python tools installed successfully."
+if [ -f "lg.zip" ]; then
+    echo "lg already installed (lg.zip exists)."
+else
+    echo "Install lg manually"
+    wget http://abyz.me.uk/lg/lg.zip
+    unzip lg.zip
+    cd lg
+    make
+    sudo make install
+    echo "lg installed successfully."
+    cd ../
+fi
+
+
+VENV_DIR="venv"
+if [ -d "$VENV_DIR" ]; then
+    echo "Virtual environment '$VENV_DIR' already exists. Skipping creation."
+else
+    echo "Creating python virtual environment '$VENV_DIR'..."
+    python -m venv "$VENV_DIR"
+    echo "Virtual environment '$VENV_DIR' created successfully."
+fi
+
+
+REQUIREMENTS_FILE="requirements.txt"
+echo "Creating $REQUIREMENTS_FILE..."
+cat > "$REQUIREMENTS_FILE" <<EOF
+rpi-lgpio==0.6
+lgpio==0.2.2.0
+gpiozero==2.0.1
+EOF
+echo "$REQUIREMENTS_FILE created successfully."
+
+
+echo "Installing Python packages into virtual environment"
+"$VENV_DIR/bin/python" -m pip install --upgrade pip
+"$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+echo "Python packages installed successfully."
