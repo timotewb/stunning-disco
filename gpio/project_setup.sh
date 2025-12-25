@@ -8,6 +8,7 @@ sudo apt install swig -y
 echo "swig installed successfully."
 sudo apt install python-dev-is-python3 python3-dev -y
 sudo apt install python3-setuptools -y
+sudo apt install python-smbus
 echo "python tools installed successfully."
 if [ -f "lg.zip" ]; then
     echo "lg already installed (lg.zip exists)."
@@ -21,7 +22,7 @@ else
     echo "lg installed successfully."
     cd ../
 fi
-sudo apt install python smbus
+sudo apt-get install i2c-tools
 
 echo "Testing i2c"
 i2cdetect -y 1
@@ -44,6 +45,9 @@ rpi-lgpio==0.6
 lgpio==0.2.2.0
 gpiozero==2.0.1
 mpu6050-raspberrypi==1.2
+smbus==1.1.post2
+smbus3==0.5.5
+RPLCD==1.4.0
 EOF
 echo "$REQUIREMENTS_FILE created successfully."
 
