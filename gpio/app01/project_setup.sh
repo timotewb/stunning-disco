@@ -9,18 +9,10 @@ echo "swig installed successfully."
 sudo apt install python-dev-is-python3 python3-dev -y
 sudo apt install python3-setuptools -y
 echo "python tools installed successfully."
-if [ -f "lg.zip" ]; then
-    echo "lg already installed (lg.zip exists)."
-else
-    echo "Install lg manually"
-    wget http://abyz.me.uk/lg/lg.zip
-    unzip lg.zip
-    cd lg
-    make
-    sudo make install
-    echo "lg installed successfully."
-    cd ../
-fi
+sudo apt install python3-smbus -y
+
+echo "Testing i2c"
+i2cdetect -y 1
 
 
 VENV_DIR="venv"
@@ -39,6 +31,9 @@ cat > "$REQUIREMENTS_FILE" <<EOF
 rpi-lgpio==0.6
 lgpio==0.2.2.0
 gpiozero==2.0.1
+mpu6050-raspberrypi==1.2
+smbus==1.1.post2
+smbus3==0.5.5
 EOF
 echo "$REQUIREMENTS_FILE created successfully."
 

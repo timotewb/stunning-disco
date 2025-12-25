@@ -21,6 +21,10 @@ else
     echo "lg installed successfully."
     cd ../
 fi
+sudo apt install python smbus
+
+echo "Testing i2c"
+i2cdetect -y 1
 
 
 VENV_DIR="venv"
@@ -39,6 +43,7 @@ cat > "$REQUIREMENTS_FILE" <<EOF
 rpi-lgpio==0.6
 lgpio==0.2.2.0
 gpiozero==2.0.1
+mpu6050-raspberrypi==1.2
 EOF
 echo "$REQUIREMENTS_FILE created successfully."
 
