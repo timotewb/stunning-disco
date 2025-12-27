@@ -176,3 +176,5 @@ cython_debug/
 lg.zip
 lg/
 .lg*
+
+.vscode/
