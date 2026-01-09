@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 #include "hardware/uart.h"
@@ -15,11 +16,129 @@
 
 const uint LED_PIN = 15;
 
-#define UART_ID uart1
+#define UART_ID uart0
 #define BAUD_RATE 115200
 
-#define UART_TX_PIN 8
-#define UART_RX_PIN 9
+#define UART_TX_PIN 0
+#define UART_RX_PIN 1
+
+#define GPS_UART uart1
+#define GPS_BAUD 9600
+
+#define GPS_TX_PIN 6   // Pico TX → GPS RX
+#define GPS_RX_PIN 7   // Pico RX ← GPS TX
+
+#define MPU6050_ADDR 0x68
+
+// MPU6050 registers
+#define MPU6050_PWR_MGMT_1 0x6B
+#define MPU6050_ACCEL_XOUT_H 0x3B
+
+#define VEML7700_ADDR 0x10
+
+#define VEML7700_ALS_CONF  0x00
+#define VEML7700_ALS_DATA  0x04
+
+#define HSCDTD_ADDR 0x0C
+/* ---------------- HSCDTD008A Compass ---------------- */
+void hscdtd_init() {
+    // Control register: continuous measurement mode
+    // Register 0x0B, value 0x01 → continuous mode
+    uint8_t cmd[2] = {0x0B, 0x01};
+    i2c_write_blocking(I2C_PORT, HSCDTD_ADDR, cmd, 2, false);
+}
+bool hscdtd_read(int16_t *mx, int16_t *my, int16_t *mz) {
+    uint8_t reg = 0x00;   // Data register start
+    uint8_t buf[6];
+
+    if (i2c_write_blocking(I2C_PORT, HSCDTD_ADDR, &reg, 1, true) != 1)
+        return false;
+
+    if (i2c_read_blocking(I2C_PORT, HSCDTD_ADDR, buf, 6, false) != 6)
+        return false;
+
+    // Big-endian signed values
+    *mx = (int16_t)(buf[0] << 8 | buf[1]);
+    *my = (int16_t)(buf[2] << 8 | buf[3]);
+    *mz = (int16_t)(buf[4] << 8 | buf[5]);
+
+    return true;
+}
+float compass_heading_deg(int16_t mx, int16_t my) {
+    float heading = atan2f((float)my, (float)mx);
+    heading *= 180.0f / M_PI;
+    if (heading < 0) heading += 360.0f;
+    return heading;
+}
+/* ---------------- VEML7700 ---------------- */
+void veml7700_init() {
+    uint8_t buf[3];
+
+    // ALS configuration:
+    // Gain = 1, Integration time = 100ms, ALS enabled
+    buf[0] = VEML7700_ALS_CONF;
+    buf[1] = 0x00; // LSB
+    buf[2] = 0x00; // MSB
+
+    i2c_write_blocking(I2C_PORT, VEML7700_ADDR, buf, 3, false);
+
+    sleep_ms(100);
+}
+bool veml7700_read_lux(float *lux) {
+    uint8_t reg = VEML7700_ALS_DATA;
+    uint8_t buf[2];
+
+    if (i2c_write_blocking(I2C_PORT, VEML7700_ADDR, &reg, 1, true) != 1)
+        return false;
+
+    if (i2c_read_blocking(I2C_PORT, VEML7700_ADDR, buf, 2, false) != 2)
+        return false;
+
+    uint16_t raw = (buf[1] << 8) | buf[0];
+
+    // For gain=1, IT=100ms
+    *lux = raw * 0.0576f;
+
+    return true;
+}
+/* ---------------- MPU6050 ---------------- */
+void mpu6050_init() {
+    uint8_t buf[2];
+
+    // Wake up MPU6050 (clear sleep bit)
+    buf[0] = MPU6050_PWR_MGMT_1;
+    buf[1] = 0x00;
+    i2c_write_blocking(I2C_PORT, MPU6050_ADDR, buf, 2, false);
+
+    sleep_ms(100);
+}
+bool mpu6050_read(
+    int16_t *ax, int16_t *ay, int16_t *az,
+    int16_t *gx, int16_t *gy, int16_t *gz,
+    float *temp_c
+) {
+    uint8_t reg = MPU6050_ACCEL_XOUT_H;
+    uint8_t buf[14];
+
+    if (i2c_write_blocking(I2C_PORT, MPU6050_ADDR, &reg, 1, true) != 1)
+        return false;
+
+    if (i2c_read_blocking(I2C_PORT, MPU6050_ADDR, buf, 14, false) != 14)
+        return false;
+
+    *ax = (buf[0] << 8) | buf[1];
+    *ay = (buf[2] << 8) | buf[3];
+    *az = (buf[4] << 8) | buf[5];
+
+    int16_t raw_temp = (buf[6] << 8) | buf[7];
+    *temp_c = raw_temp / 340.0f + 36.53f;
+
+    *gx = (buf[8] << 8) | buf[9];
+    *gy = (buf[10] << 8) | buf[11];
+    *gz = (buf[12] << 8) | buf[13];
+
+    return true;
+}
 
 
 /* ---------------- UART ---------------- */
@@ -37,6 +156,87 @@ void uart_init_custom() {
 void uart_send_string(const char* str) {
     uart_puts(UART_ID, str);
 }
+
+void gps_uart_init() {
+    uart_init(GPS_UART, GPS_BAUD);
+    gpio_set_function(GPS_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(GPS_RX_PIN, GPIO_FUNC_UART);
+    uart_set_fifo_enabled(GPS_UART, true);
+}
+
+
+/* ---------------- GPS (ATGM336H) ---------------- */
+char gps_line[128];
+int gps_idx = 0;
+
+float gps_lat = NAN;
+float gps_lon = NAN;
+bool gps_fix = false;
+
+bool gps_read_line(char *out, size_t maxlen) {
+    while (uart_is_readable(GPS_UART)) {
+        char c = uart_getc(GPS_UART);
+
+        if (c == '\n') {
+            out[gps_idx] = 0;
+            gps_idx = 0;
+            return true;
+        }
+
+        if (gps_idx < (int)maxlen - 1) {
+            out[gps_idx++] = c;
+        }
+    }
+    return false;
+}
+
+void parse_gga(const char *line) {
+    if (strncmp(line, "$GNGGA", 6) != 0 &&
+        strncmp(line, "$GPGGA", 6) != 0) {
+        return;
+    }
+
+    char buf[128];
+    strncpy(buf, line, sizeof(buf));
+    buf[sizeof(buf) - 1] = 0;
+
+    char *tok = strtok(buf, ",");
+    int field = 0;
+
+    float lat = 0, lon = 0;
+    char lat_dir = 0, lon_dir = 0;
+    int fix = 0;
+
+    while (tok) {
+        tok = strtok(NULL, ",");
+        field++;
+
+        if (!tok) break;
+
+        switch (field) {
+            case 2: lat = atof(tok); break;
+            case 3: lat_dir = tok[0]; break;
+            case 4: lon = atof(tok); break;
+            case 5: lon_dir = tok[0]; break;
+            case 6: fix = atoi(tok); break;
+        }
+    }
+
+    if (fix > 0) {
+        int lat_deg = (int)(lat / 100);
+        float lat_min = lat - lat_deg * 100;
+        gps_lat = lat_deg + lat_min / 60.0f;
+        if (lat_dir == 'S') gps_lat = -gps_lat;
+
+        int lon_deg = (int)(lon / 100);
+        float lon_min = lon - lon_deg * 100;
+        gps_lon = lon_deg + lon_min / 60.0f;
+        if (lon_dir == 'W') gps_lon = -gps_lon;
+
+        gps_fix = true;
+    }
+}
+
 
 /* ---------------- AHT20 ---------------- */
 
@@ -170,6 +370,10 @@ int main() {
     gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);
     gpio_pull_up(SDA_PIN);
     gpio_pull_up(SCL_PIN);
+
+    /* UART init */
+    uart_init_custom();   // ESP32 UART (unchanged)
+    gps_uart_init();      // GPS UART (NEW)
     
     gpio_put(LED_PIN, 1);
     sleep_ms(500);
@@ -178,14 +382,45 @@ int main() {
 
     bmp280_read_calibration();
     bmp280_init();
+    mpu6050_init();
+    veml7700_init();
+    hscdtd_init();
 
-    printf("AHT20 + BMP280 calibrated\n");
+    printf("AHT20 + BMP280 + MPU6050 + VEML7700 + HSCDTD008A ready\n");
 
     while (true) {
         float aht_t, aht_h;
         uint8_t aht_status;
 
         int32_t adc_t, adc_p;
+
+        /* read gps */
+        char line[128];
+        if (gps_read_line(line, sizeof(line))) {
+            parse_gga(line);
+        }
+
+        /* read mpu6050 */
+        int16_t ax, ay, az, gx, gy, gz;
+        float mpu_temp;
+
+        bool mpu_ok = mpu6050_read(
+            &ax, &ay, &az,
+            &gx, &gy, &gz,
+            &mpu_temp
+        );
+
+        // read veml7700
+        float lux = 0.0f;
+        bool veml_ok = veml7700_read_lux(&lux);
+
+        // read hscdtd008a
+        int16_t mag_x = 0, mag_y = 0, mag_z = 0;
+        float heading = NAN;
+        bool mag_ok = hscdtd_read(&mag_x, &mag_y, &mag_z);
+        if (mag_ok) {
+            heading = compass_heading_deg(mag_x, mag_y);
+        }
 
         if (read_aht20(&aht_t, &aht_h, &aht_status)) {
             gpio_put(LED_PIN, 1);
@@ -196,12 +431,28 @@ int main() {
 
 
             // After reading sensors
-            char buf[128];
-            snprintf(buf, sizeof(buf),
-                    "uart>ahtT=%.2f,ahtH=%.2f,bmpT=%.2f,bmpP=%.2f,alt=%.2f\n",
-                    aht_t, aht_h,
-                    bmp_t, bmp_p,
-                    altitude);
+            char buf[320];
+            int len = snprintf(buf, sizeof(buf),
+                "ahtT=%.2f,ahtH=%.2f,ahtStatus=0x%02X,"
+                "bmpT=%.2f,bmpP=%.2f,alt=%.2f,"
+                "mpuOk=%d,ax=%d,ay=%d,az=%d,gx=%d,gy=%d,gz=%d,mpuT=%.2f,"
+                "luxOk=%d,lux=%.2f,"
+                "magOk=%d,magX=%d,magY=%d,magZ=%d,head=%.1f,"
+                "gpsfix=%d",
+                aht_t, aht_h, aht_status,
+                bmp_t, bmp_p, altitude,
+                mpu_ok ? 1 : 0, ax, ay, az, gx, gy, gz, mpu_temp,
+                veml_ok ? 1 : 0, veml_ok ? lux : NAN,
+                mag_ok ? 1 : 0, mag_x, mag_y, mag_z, mag_ok ? heading : NAN,
+                gps_fix ? 1 : 0
+            );
+            if (len > 0 && len < (int)sizeof(buf)) {
+                if (gps_fix) {
+                    len += snprintf(buf + len, sizeof(buf) - len, ",lat=%.6f,lon=%.6f\n", gps_lat, gps_lon);
+                } else {
+                    snprintf(buf + len, sizeof(buf) - len, "\n");
+                }
+            }
 
             // Send over USB for debugging
             printf("%s", buf);
@@ -216,6 +467,6 @@ int main() {
             printf("AHT20 read error\n");
         }
 
-        sleep_ms(2000);
+        sleep_ms(10000);
     }
 }
