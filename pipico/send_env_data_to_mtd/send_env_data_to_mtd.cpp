@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 #include "pico/stdlib.h"
+#include "pico/time.h"
 #include "hardware/i2c.h"
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
@@ -48,6 +50,8 @@ using namespace pico_ssd1306;
 
 /* ---------------- OLED ---------------- */
 
+
+static bool rand_seeded = false;
 
 /* ---------------- HSCDTD008A Compass ---------------- */
 void hscdtd_init() {
@@ -181,6 +185,8 @@ int gps_idx = 0;
 float gps_lat = NAN;
 float gps_lon = NAN;
 bool gps_fix = false;
+bool gps_datetime_valid = false;
+char gps_datetime_buf[20];
 
 bool gps_read_line(char *out, size_t maxlen) {
     while (uart_is_readable(GPS_UART)) {
@@ -231,19 +237,121 @@ void parse_gga(const char *line) {
         }
     }
 
-    if (fix > 0) {
-        int lat_deg = (int)(lat / 100);
-        float lat_min = lat - lat_deg * 100;
+    gps_fix = fix > 0;
+
+    if (gps_fix) {
+        int lat_deg = static_cast<int>(lat / 100.0f);
+        float lat_min = lat - lat_deg * 100.0f;
         gps_lat = lat_deg + lat_min / 60.0f;
         if (lat_dir == 'S') gps_lat = -gps_lat;
 
-        int lon_deg = (int)(lon / 100);
-        float lon_min = lon - lon_deg * 100;
+        int lon_deg = static_cast<int>(lon / 100.0f);
+        float lon_min = lon - lon_deg * 100.0f;
         gps_lon = lon_deg + lon_min / 60.0f;
         if (lon_dir == 'W') gps_lon = -gps_lon;
+    } else {
+        gps_lat = NAN;
+        gps_lon = NAN;
+    }
+}
 
+void parse_rmc(const char *line) {
+    if (strncmp(line, "$GNRMC", 6) != 0 &&
+        strncmp(line, "$GPRMC", 6) != 0) {
+        return;
+    }
+
+    char buf[128];
+    strncpy(buf, line, sizeof(buf));
+    buf[sizeof(buf) - 1] = 0;
+
+    char *tok = strtok(buf, ",");
+    int field = 0;
+
+    float lat = 0.0f, lon = 0.0f;
+    char lat_dir = 0, lon_dir = 0;
+    char status = 'V';
+    char time_field[16] = {0};
+    char date_field[16] = {0};
+
+    while (tok) {
+        tok = strtok(NULL, ",");
+        field++;
+
+        if (!tok) break;
+
+        switch (field) {
+            case 1:
+                strncpy(time_field, tok, sizeof(time_field) - 1);
+                break;
+            case 2:
+                status = tok[0];
+                break;
+            case 3:
+                lat = atof(tok);
+                break;
+            case 4:
+                lat_dir = tok[0];
+                break;
+            case 5:
+                lon = atof(tok);
+                break;
+            case 6:
+                lon_dir = tok[0];
+                break;
+            case 9:
+                strncpy(date_field, tok, sizeof(date_field) - 1);
+                break;
+        }
+    }
+
+    if (status != 'A') {
+        gps_datetime_valid = false;
+        gps_fix = false;
+        gps_lat = NAN;
+        gps_lon = NAN;
+        return;
+    }
+
+    if (lat != 0.0f && lon != 0.0f) {
+        int lat_deg = static_cast<int>(lat / 100.0f);
+        float lat_min = lat - lat_deg * 100.0f;
+        gps_lat = lat_deg + lat_min / 60.0f;
+        if (lat_dir == 'S') gps_lat = -gps_lat;
+
+        int lon_deg = static_cast<int>(lon / 100.0f);
+        float lon_min = lon - lon_deg * 100.0f;
+        gps_lon = lon_deg + lon_min / 60.0f;
+        if (lon_dir == 'W') gps_lon = -gps_lon;
         gps_fix = true;
     }
+
+    if (strlen(time_field) >= 6 && strlen(date_field) == 6) {
+        char hh[3] = {time_field[0], time_field[1], 0};
+        char mm[3] = {time_field[2], time_field[3], 0};
+        char ss[3] = {time_field[4], time_field[5], 0};
+
+        char dd[3] = {date_field[0], date_field[1], 0};
+        char mo[3] = {date_field[2], date_field[3], 0};
+        char yy[3] = {date_field[4], date_field[5], 0};
+
+        int year = 2000 + atoi(yy);
+        int month = atoi(mo);
+        int day = atoi(dd);
+        int hour = atoi(hh);
+        int minute = atoi(mm);
+        int second = atoi(ss);
+
+        snprintf(gps_datetime_buf, sizeof(gps_datetime_buf),
+                 "%04d%02d%02d %02d%02d%02d",
+                 year, month, day, hour, minute, second);
+        gps_datetime_valid = true;
+    }
+}
+
+void handle_nmea_sentence(const char *line) {
+    parse_gga(line);
+    parse_rmc(line);
 }
 
 
@@ -395,7 +503,7 @@ int main() {
     veml7700_init();
     hscdtd_init();
 
-    SSD1306 display = SSD1306(i2c1, 0x3D, Size::W128xH32);
+    SSD1306 display = SSD1306(i2c1, 0x3C, Size::W128xH32);
     display.setOrientation(0);
 
     printf("AHT20 + BMP280 + MPU6050 + VEML7700 + HSCDTD008A ready\n");
@@ -409,7 +517,7 @@ int main() {
         /* read gps */
         char line[128];
         if (gps_read_line(line, sizeof(line))) {
-            parse_gga(line);
+            handle_nmea_sentence(line);
         }
 
         /* read mpu6050 */
@@ -468,7 +576,73 @@ int main() {
                 }
             }
 
-            drawText(&display, font_12x16, "TEST text", 0 ,0);
+            if (!rand_seeded) {
+                srand(static_cast<unsigned>(time_us_64()));
+                rand_seeded = true;
+            }
+
+            char line_temp[24];
+            snprintf(line_temp, sizeof(line_temp), "AHT T:%5.1fC", aht_t);
+
+            char line_gps[24];
+
+            char random_entries[16][24];
+            int entry_count = 0;
+
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "AHT H:%5.1f%%", aht_h);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "AHT St:0x%02X", aht_status);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "BMP T:%5.1fC", bmp_t);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "BMP P:%7.1fhPa", bmp_p / 100.0f);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "BMP Alt:%6.1fm", altitude);
+            if (veml_ok && entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "VEML Lux:%6.1f", lux);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "MPU T:%5.1fC", mpu_temp);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "MPU Ax:%6d", ax);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "MPU Ay:%6d", ay);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "MPU Az:%6d", az);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "MPU Gx:%6d", gx);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "MPU Gy:%6d", gy);
+            if (entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "MPU Gz:%6d", gz);
+            if (mag_ok && entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "HSCD Head:%5.1f", heading);
+            if (mag_ok && entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "HSCD X:%6d", mag_x);
+            if (mag_ok && entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "HSCD Y:%6d", mag_y);
+            if (mag_ok && entry_count < 16) snprintf(random_entries[entry_count++], sizeof(random_entries[0]), "HSCD Z:%6d", mag_z);
+
+            int indices[16];
+            for (int i = 0; i < entry_count; ++i) {
+                indices[i] = i;
+            }
+            for (int i = entry_count - 1; i > 0; --i) {
+                int j = rand() % (i + 1);
+                int tmp = indices[i];
+                indices[i] = indices[j];
+                indices[j] = tmp;
+            }
+
+            const char *line_ptrs[4];
+            int line_count = 0;
+            line_ptrs[line_count++] = line_temp;
+
+            if (gps_fix && line_count < 4) {
+                snprintf(line_gps, sizeof(line_gps), "GPS %.4f %.4f", gps_lat, gps_lon);
+                line_ptrs[line_count++] = line_gps;
+            }
+
+            int desired_random = 4 - line_count;
+            int random_added = 0;
+            for (int i = 0; i < entry_count && random_added < desired_random && line_count < 4; ++i) {
+                line_ptrs[line_count++] = random_entries[indices[i]];
+                random_added++;
+            }
+
+            static const char placeholder[] = "DATA ---";
+            while (line_count < 4) {
+                line_ptrs[line_count++] = placeholder;
+            }
+
+            for (int i = 0; i < 4; ++i) {
+                int y = i * 8;
+                drawText(&display, font_8x8, line_ptrs[i], 0, y);
+            }
             display.sendBuffer();
             // Send over USB for debugging
             printf("%s", buf);
