@@ -5,6 +5,8 @@
 #include "hardware/i2c.h"
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
+#include "ssd1306.h"
+#include "textRenderer/TextRenderer.h"
 
 /* ---------- CONFIG ---------- */
 #define I2C_PORT i2c1
@@ -40,6 +42,13 @@ const uint LED_PIN = 15;
 #define VEML7700_ALS_DATA  0x04
 
 #define HSCDTD_ADDR 0x0C
+
+// Use the namespace for convenience
+using namespace pico_ssd1306;
+
+/* ---------------- OLED ---------------- */
+
+
 /* ---------------- HSCDTD008A Compass ---------------- */
 void hscdtd_init() {
     // Control register: continuous measurement mode
@@ -386,6 +395,9 @@ int main() {
     veml7700_init();
     hscdtd_init();
 
+    SSD1306 display = SSD1306(i2c1, 0x3D, Size::W128xH32);
+    display.setOrientation(0);
+
     printf("AHT20 + BMP280 + MPU6050 + VEML7700 + HSCDTD008A ready\n");
 
     while (true) {
@@ -422,6 +434,8 @@ int main() {
             heading = compass_heading_deg(mag_x, mag_y);
         }
 
+        display.clear();
+
         if (read_aht20(&aht_t, &aht_h, &aht_status)) {
             gpio_put(LED_PIN, 1);
             bmp280_read_raw(&adc_t, &adc_p);
@@ -454,6 +468,8 @@ int main() {
                 }
             }
 
+            drawText(&display, font_12x16, "TEST text", 0 ,0);
+            display.sendBuffer();
             // Send over USB for debugging
             printf("%s", buf);
 
@@ -467,6 +483,6 @@ int main() {
             printf("AHT20 read error\n");
         }
 
-        sleep_ms(10000);
+        sleep_ms(20000);
     }
 }

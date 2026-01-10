@@ -50,6 +50,7 @@ target_link_libraries(send_env_data_to_mtd
     hardware_i2c
     hardware_uart
     hardware_gpio
+    pico_ssd1306
 )
 
 # Add the standard include files to the build
@@ -59,3 +60,4 @@ target_include_directories(send_env_data_to_mtd PRIVATE
 
 pico_add_extra_outputs(send_env_data_to_mtd)
 
+add_subdirectory(lib/pico-ssd1306)
