@@ -35,7 +35,20 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(send_env_data_to_mtd send_env_data_to_mtd.cpp )
+set(SEND_ENV_DATA_TO_MTD_SOURCES
+    send_env_data_to_mtd.cpp
+    src/display/display.cpp
+    src/gps/gps.cpp
+    src/sensors/aht20.cpp
+    src/sensors/bmp280.cpp
+    src/sensors/hscdtd.cpp
+    src/sensors/mpu6050.cpp
+    src/sensors/veml7700.cpp
+    src/telemetry/telemetry.cpp
+    src/utils/random.cpp
+)
+
+add_executable(send_env_data_to_mtd ${SEND_ENV_DATA_TO_MTD_SOURCES})
 
 pico_set_program_name(send_env_data_to_mtd "send_env_data_to_mtd")
 pico_set_program_version(send_env_data_to_mtd "0.1")
@@ -56,6 +69,7 @@ target_link_libraries(send_env_data_to_mtd
 # Add the standard include files to the build
 target_include_directories(send_env_data_to_mtd PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/src
 )
 
 pico_add_extra_outputs(send_env_data_to_mtd)
