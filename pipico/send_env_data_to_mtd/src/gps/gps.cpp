@@ -217,9 +217,23 @@ void Init() {
     uart_set_fifo_enabled(app::config::GPS_UART, true);
 }
 
+static bool start_of_line = true;
+
 void Poll(app::model::GpsData &data) {
-    char line[sizeof(line_buffer)];
+    char line[128];
+
     while (ReadLine(line, sizeof(line))) {
+        // Ensure printable ASCII only
+        for (char *p = line; *p; ++p) {
+            if (*p < 0x20 || *p > 0x7E) {
+                *p = '?';
+            }
+        }
+
+        // Send as ONE line
+        printf("GPS: %s\n", line);
+
+        // Parse
         ParseGga(line, data);
         ParseRmc(line, data);
     }

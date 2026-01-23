@@ -27,8 +27,8 @@ constexpr uint UART_RX_PIN = 1;
 
 inline uart_inst_t *const GPS_UART = uart1;
 constexpr uint GPS_BAUD = 9600;
-constexpr uint GPS_TX_PIN = 6;  // Pico TX -> GPS RX
-constexpr uint GPS_RX_PIN = 7;  // Pico RX <- GPS TX
+constexpr uint GPS_TX_PIN = 4;  // Pico TX -> GPS RX
+constexpr uint GPS_RX_PIN = 5;  // Pico RX <- GPS TX
 
 constexpr uint I2C_FREQUENCY_HZ = 100 * 1000;
 
