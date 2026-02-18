@@ -11,10 +11,12 @@ void setup() {
 }
 
 void loop() {
+  printf("Internal LED on\n");
   digitalWrite(LEDI, HIGH); //Set the LED to high
   delay(100); //wait 0.5s
   digitalWrite(LEDI, LOW); //Set the LED to low
   delay(100); //wait 0.5s
+  printf("External LED on\n");
   digitalWrite(LEDX, HIGH); //Set the LED to high
   delay(100); //wait 0.5s
   digitalWrite(LEDX, LOW); //Set the LED to low
