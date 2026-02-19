@@ -23,6 +23,6 @@ void setup() {
 void loop() {
     sensors.readAndPrint();
 
-    // Sleep 1000 ms using low power
-    LowPower::sleepMs(1000);
+    // Sleep 2000 ms using low power
+    LowPower::sleepMs(2000);
 }
