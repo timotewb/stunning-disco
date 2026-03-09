@@ -178,3 +178,28 @@ lg/
 .lg*
 
 .vscode/
+
+# Node / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# Env files (keep secrets out)
+.env.*
+!.env.example
+
+# Build/test/cache
+coverage/
+*.tsbuildinfo
+.parcel-cache/
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
+out/
+
+# OS
+.DS_Store
