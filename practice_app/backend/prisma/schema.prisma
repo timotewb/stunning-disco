@@ -1,0 +1,92 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model TeamMember {
+  id            String          @id @default(uuid())
+  name          String
+  role          String
+  seniority     String
+  tags          String          @default("[]")
+  notes         String          @default("")
+  createdAt     DateTime        @default(now())
+  matrixEntries MatrixEntry[]
+  allocations   Allocation[]
+  primarySME    SMEAssignment[] @relation("PrimarySME")
+  backupSME     SMEAssignment[] @relation("BackupSME")
+}
+
+model Dimension {
+  id          String          @id @default(uuid())
+  name        String
+  type        String          @default("skills")
+  description String          @default("")
+  nodes       DimensionNode[]
+}
+
+model DimensionNode {
+  id             String          @id @default(uuid())
+  dimensionId    String
+  parentId       String?
+  name           String
+  orderIndex     Int             @default(0)
+  dimension      Dimension       @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  parent         DimensionNode?  @relation("NodeChildren", fields: [parentId], references: [id])
+  children       DimensionNode[] @relation("NodeChildren")
+  matrixEntries  MatrixEntry[]
+  smeAssignments SMEAssignment[]
+}
+
+model Snapshot {
+  id             String          @id @default(uuid())
+  timestamp      DateTime
+  label          String
+  matrixEntries  MatrixEntry[]
+  smeAssignments SMEAssignment[]
+}
+
+model MatrixEntry {
+  id              String        @id @default(uuid())
+  teamMemberId    String
+  dimensionNodeId String
+  snapshotId      String
+  value           Int           @default(0)
+  teamMember      TeamMember    @relation(fields: [teamMemberId], references: [id], onDelete: Cascade)
+  dimensionNode   DimensionNode @relation(fields: [dimensionNodeId], references: [id], onDelete: Cascade)
+  snapshot        Snapshot      @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([teamMemberId, dimensionNodeId, snapshotId])
+}
+
+model Allocation {
+  id           String     @id @default(uuid())
+  teamMemberId String
+  projectName  String
+  type         String     @default("project")
+  startDate    DateTime
+  endDate      DateTime
+  notes        String     @default("")
+  teamMember   TeamMember @relation(fields: [teamMemberId], references: [id], onDelete: Cascade)
+}
+
+model SMEAssignment {
+  id              String        @id @default(uuid())
+  dimensionNodeId String
+  primaryMemberId String
+  backupMemberId  String?
+  snapshotId      String
+  dimensionNode   DimensionNode @relation(fields: [dimensionNodeId], references: [id], onDelete: Cascade)
+  primaryMember   TeamMember    @relation("PrimarySME", fields: [primaryMemberId], references: [id], onDelete: Cascade)
+  backupMember    TeamMember?   @relation("BackupSME", fields: [backupMemberId], references: [id])
+  snapshot        Snapshot      @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([dimensionNodeId, snapshotId])
+}

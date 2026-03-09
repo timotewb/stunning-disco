@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ~/practice-data:/app/data
+    environment:
+      - DATABASE_URL=file:/app/data/practice.db
+      - NODE_ENV=production

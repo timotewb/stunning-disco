@@ -1,0 +1,31 @@
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Layout from './components/Layout';
+import Dashboard from './pages/Dashboard';
+import Team from './pages/Team';
+import Matrices from './pages/Matrices';
+import Timeline from './pages/Timeline';
+import Capabilities from './pages/Capabilities';
+import Settings from './pages/Settings';
+import { SnapshotProvider } from './context/SnapshotContext';
+
+const App: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <SnapshotProvider>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="team" element={<Team />} />
+            <Route path="matrices" element={<Matrices />} />
+            <Route path="timeline" element={<Timeline />} />
+            <Route path="capabilities" element={<Capabilities />} />
+            <Route path="settings" element={<Settings />} />
+          </Route>
+        </Routes>
+      </SnapshotProvider>
+    </BrowserRouter>
+  );
+};
+
+export default App;
