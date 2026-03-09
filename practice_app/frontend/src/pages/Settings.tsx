@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown } from 'lucide-react';
-import type { Dimension, DimensionNode } from '../types';
+import type { Dimension, DimensionNode, Snapshot } from '../types';
 import {
   getDimensions,
   createDimension,
@@ -9,9 +9,14 @@ import {
   createNode,
   updateNode,
   deleteNode,
+  getSnapshots,
+  deleteSnapshot,
+  deleteSnapshots,
 } from '../api/client';
+import { useSnapshot } from '../context/SnapshotContext';
 
 const Settings: React.FC = () => {
+  const { activeSnapshot, setActiveSnapshot, refresh: refreshSnapshots } = useSnapshot();
   const [dimensions, setDimensions] = useState<Dimension[]>([]);
   const [loading, setLoading] = useState(true);
   const [newDimName, setNewDimName] = useState('');
@@ -22,6 +27,13 @@ const Settings: React.FC = () => {
   const [expandedDims, setExpandedDims] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
 
+  // Snapshot management state
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [snapsLoading, setSnapsLoading] = useState(true);
+  const [selectedSnaps, setSelectedSnaps] = useState<Set<string>>(new Set());
+  const [deletingSnaps, setDeletingSnaps] = useState(false);
+  const [confirmDeleteSnaps, setConfirmDeleteSnaps] = useState<string[] | null>(null);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -31,7 +43,16 @@ const Settings: React.FC = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  const loadSnapshots = async () => {
+    setSnapsLoading(true);
+    try {
+      setSnapshots(await getSnapshots());
+    } finally {
+      setSnapsLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); loadSnapshots(); }, []);
 
   const toggleDim = (id: string) => {
     setExpandedDims((prev) => {
@@ -82,6 +103,44 @@ const Settings: React.FC = () => {
       load();
     } catch {
       setError('Failed to add node.');
+    }
+  };
+
+  // Snapshot helpers
+  const allSelected = snapshots.length > 0 && selectedSnaps.size === snapshots.length;
+  const toggleSelectAll = () =>
+    setSelectedSnaps(allSelected ? new Set() : new Set(snapshots.map((s) => s.id)));
+  const toggleSnap = (id: string) =>
+    setSelectedSnaps((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const doDeleteSnapshots = async (ids: string[]) => {
+    setDeletingSnaps(true);
+    try {
+      if (ids.length === 1) {
+        await deleteSnapshot(ids[0]);
+      } else {
+        await deleteSnapshots(ids);
+      }
+      setSelectedSnaps((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      // If active snapshot was deleted, clear it
+      if (activeSnapshot && ids.includes(activeSnapshot.id)) {
+        setActiveSnapshot(null);
+      }
+      await loadSnapshots();
+      await refreshSnapshots();
+    } catch {
+      setError('Failed to delete snapshot(s).');
+    } finally {
+      setDeletingSnaps(false);
+      setConfirmDeleteSnaps(null);
     }
   };
 
@@ -216,6 +275,123 @@ const Settings: React.FC = () => {
                 )}
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      {/* Snapshot Management */}
+      <section className="mt-10">
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">Snapshots</h3>
+
+        {/* Confirmation dialog */}
+        {confirmDeleteSnaps && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm">
+            <p className="text-red-700 font-medium mb-3">
+              Delete {confirmDeleteSnaps.length} snapshot{confirmDeleteSnaps.length > 1 ? 's' : ''}?
+              This will also remove all matrix entries and SME assignments in {confirmDeleteSnaps.length > 1 ? 'those snapshots' : 'that snapshot'}.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => doDeleteSnapshots(confirmDeleteSnaps)}
+                disabled={deletingSnaps}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium disabled:opacity-50"
+              >
+                {deletingSnaps ? 'Deleting…' : 'Yes, delete'}
+              </button>
+              <button
+                onClick={() => setConfirmDeleteSnaps(null)}
+                disabled={deletingSnaps}
+                className="px-3 py-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg text-xs disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Bulk actions toolbar */}
+        {selectedSnaps.size > 0 && !confirmDeleteSnaps && (
+          <div className="mb-3 flex items-center gap-3 p-2 bg-indigo-50 border border-indigo-100 rounded-lg">
+            <span className="text-xs text-indigo-700 font-medium">{selectedSnaps.size} selected</span>
+            <button
+              onClick={() => setConfirmDeleteSnaps(Array.from(selectedSnaps))}
+              className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium"
+            >
+              <Trash2 size={12} /> Delete selected
+            </button>
+            <button
+              onClick={() => setSelectedSnaps(new Set())}
+              className="text-xs text-indigo-500 hover:text-indigo-700"
+            >
+              Clear selection
+            </button>
+          </div>
+        )}
+
+        {snapsLoading ? (
+          <div className="text-gray-400 text-sm">Loading…</div>
+        ) : snapshots.length === 0 ? (
+          <div className="text-gray-400 text-sm">No snapshots yet.</div>
+        ) : (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50">
+                  <th className="px-4 py-2 w-10">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleSelectAll}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-300"
+                      title="Select all"
+                    />
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Date / Label</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-2 w-16"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshots.map((snap) => {
+                  const isActive = activeSnapshot?.id === snap.id;
+                  return (
+                    <tr
+                      key={snap.id}
+                      className={`border-b border-gray-100 last:border-0 ${selectedSnaps.has(snap.id) ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
+                    >
+                      <td className="px-4 py-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedSnaps.has(snap.id)}
+                          onChange={() => toggleSnap(snap.id)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-300"
+                        />
+                      </td>
+                      <td className="px-4 py-2 text-gray-700 font-mono text-xs">
+                        {new Date(snap.timestamp).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-2">
+                        {isActive && (
+                          <span className="inline-flex items-center px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full font-medium">
+                            Active
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        <button
+                          onClick={() => setConfirmDeleteSnaps([snap.id])}
+                          disabled={deletingSnaps}
+                          className="p-1.5 text-gray-400 hover:text-red-500 rounded disabled:opacity-50"
+                          title="Delete snapshot"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </section>

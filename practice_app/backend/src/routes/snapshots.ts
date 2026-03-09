@@ -17,14 +17,28 @@ router.get('/', async (_req: Request, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { timestamp, label } = req.body;
+    const { timestamp } = req.body;
     const snapshot = await prisma.snapshot.create({
       data: {
         timestamp: new Date(timestamp || Date.now()),
-        label: label || new Date().toISOString().split('T')[0],
       },
     });
     res.status(201).json(snapshot);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// DELETE /api/snapshots/bulk — body: { ids: string[] }
+router.delete('/bulk', async (req: Request, res: Response) => {
+  try {
+    const { ids } = req.body as { ids?: string[] };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: 'ids must be a non-empty array' });
+      return;
+    }
+    await prisma.snapshot.deleteMany({ where: { id: { in: ids } } });
+    res.status(204).send();
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

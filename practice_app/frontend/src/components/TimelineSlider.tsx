@@ -70,7 +70,9 @@ const TimelineSlider: React.FC = () => {
       </div>
 
       <span className="text-sm text-gray-600 whitespace-nowrap min-w-[120px] text-right">
-        {activeSnapshot?.label ?? '—'}
+        {activeSnapshot
+          ? new Date(activeSnapshot.timestamp).toLocaleString()
+          : '—'}
       </span>
 
       <select

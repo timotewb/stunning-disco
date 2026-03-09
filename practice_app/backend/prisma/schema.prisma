@@ -49,7 +49,6 @@ model DimensionNode {
 model Snapshot {
   id             String          @id @default(uuid())
   timestamp      DateTime
-  label          String
   matrixEntries  MatrixEntry[]
   smeAssignments SMEAssignment[]
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -40,8 +40,7 @@ const Matrices: React.FC = () => {
   const [entries, setEntries] = useState<MatrixEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingCell, setEditingCell] = useState<{ memberId: string; nodeId: string } | null>(null);
-  const [newSnapshotLabel, setNewSnapshotLabel] = useState('');
-  const [showNewSnapshot, setShowNewSnapshot] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [memberFilter, setMemberFilter] = useState('');
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -68,31 +67,62 @@ const Matrices: React.FC = () => {
   }, [currentSnapshotId, selectedDimId]);
 
   const dimension = dimensions.find((d) => d.id === selectedDimId);
-  const leafNodes: DimensionNode[] = dimension
-    ? dimension.nodes.filter((n) => !dimension.nodes.some((c) => c.parentId === n.id))
-    : [];
-
-  const filteredTeam = team.filter((m) =>
-    m.name.toLowerCase().includes(memberFilter.toLowerCase())
+  const leafNodes: DimensionNode[] = useMemo(
+    () =>
+      dimension
+        ? dimension.nodes.filter((n) => !dimension.nodes.some((c) => c.parentId === n.id))
+        : [],
+    [dimension]
   );
 
-  const getEntry = (memberId: string, nodeId: string) =>
-    entries.find((e) => e.teamMemberId === memberId && e.dimensionNodeId === nodeId);
+  const filteredTeam = useMemo(
+    () => team.filter((m) => m.name.toLowerCase().includes(memberFilter.toLowerCase())),
+    [team, memberFilter]
+  );
 
-  const handleCellClick = async (memberId: string, nodeId: string, currentValue: number) => {
-    if (!currentSnapshotId) return;
-    const next = (currentValue + 1) % 5;
-    await upsertMatrixEntry({ teamMemberId: memberId, dimensionNodeId: nodeId, snapshotId: currentSnapshotId, value: next });
-    const updated = await getMatrix({ dimensionId: selectedDimId, snapshotId: currentSnapshotId });
-    setEntries(updated);
-    setEditingCell(null);
-  };
+  const getEntry = useCallback(
+    (memberId: string, nodeId: string) =>
+      entries.find((e) => e.teamMemberId === memberId && e.dimensionNodeId === nodeId),
+    [entries]
+  );
+
+  const handleCellClick = useCallback(
+    async (memberId: string, nodeId: string, value: number) => {
+      if (!currentSnapshotId || saving) return;
+      setSaving(true);
+      try {
+        await upsertMatrixEntry({ teamMemberId: memberId, dimensionNodeId: nodeId, snapshotId: currentSnapshotId, value });
+        const updated = await getMatrix({ dimensionId: selectedDimId, snapshotId: currentSnapshotId });
+        setEntries(updated);
+        setEditingCell(null);
+      } catch {
+        // keep editing state on error so user can retry
+      } finally {
+        setSaving(false);
+      }
+    },
+    [currentSnapshotId, selectedDimId, saving]
+  );
+
+  // Dismiss edit mode on Escape or click outside the table
+  useEffect(() => {
+    if (!editingCell) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEditingCell(null); };
+    const onClickOutside = (e: MouseEvent) => {
+      if (contentRef.current && !contentRef.current.contains(e.target as Node)) {
+        setEditingCell(null);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClickOutside);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClickOutside);
+    };
+  }, [editingCell]);
 
   const handleCreateSnapshot = async () => {
-    if (!newSnapshotLabel.trim()) return;
-    await createSnapshot({ label: newSnapshotLabel.trim() });
-    setNewSnapshotLabel('');
-    setShowNewSnapshot(false);
+    await createSnapshot();
     await refreshSnapshots();
     const snaps = await getSnapshots();
     setSnapshots(snaps);
@@ -118,51 +148,63 @@ const Matrices: React.FC = () => {
     }
   };
 
-  const columns: ColumnDef<TeamMember>[] = [
-    {
-      id: 'name',
-      header: 'Member',
-      accessorFn: (m) => m.name,
-      cell: (info) => (
-        <span className="font-medium text-gray-800 whitespace-nowrap">{info.getValue() as string}</span>
-      ),
-      size: 160,
-    },
-    ...leafNodes.map((node) => ({
-      id: node.id,
-      header: node.name,
-      cell: ({ row }: { row: { original: TeamMember } }) => {
-        const entry = getEntry(row.original.id, node.id);
-        const val = entry?.value ?? 0;
-        const isEditing = editingCell?.memberId === row.original.id && editingCell?.nodeId === node.id;
-        if (isEditing) {
-          return (
-            <div className="flex gap-0.5">
-              {[0, 1, 2, 3, 4].map((v) => (
-                <button
-                  key={v}
-                  onClick={() => handleCellClick(row.original.id, node.id, v - 1)}
-                  className={`w-7 h-7 text-xs rounded font-medium border ${v === val ? 'border-indigo-500' : 'border-transparent'} ${cellBg(v)}`}
-                  title={RATING_LABELS[v]}
-                >
-                  {v}
-                </button>
-              ))}
-            </div>
-          );
-        }
-        return (
-          <button
-            onClick={() => setEditingCell({ memberId: row.original.id, nodeId: node.id })}
-            className={`w-9 h-9 rounded text-sm font-semibold transition-colors ${cellBg(val)}`}
-            title={RATING_LABELS[val]}
-          >
-            {val > 0 ? val : ''}
-          </button>
-        );
+  const columns: ColumnDef<TeamMember>[] = useMemo(
+    () => [
+      {
+        id: 'name',
+        header: 'Member',
+        accessorFn: (m) => m.name,
+        cell: (info) => (
+          <span className="font-medium text-gray-800 whitespace-nowrap">{info.getValue() as string}</span>
+        ),
+        size: 160,
       },
-    })),
-  ];
+      ...leafNodes.map((node) => ({
+        id: node.id,
+        header: node.name,
+        cell: ({ row }: { row: { original: TeamMember } }) => {
+          const entry = getEntry(row.original.id, node.id);
+          const val = entry?.value ?? 0;
+          const isEditing = editingCell?.memberId === row.original.id && editingCell?.nodeId === node.id;
+          if (isEditing) {
+            return (
+              <div className="flex gap-0.5">
+                {[0, 1, 2, 3, 4].map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => handleCellClick(row.original.id, node.id, v)}
+                    disabled={saving}
+                    className={`w-7 h-7 text-xs rounded font-medium border transition-opacity ${saving ? 'opacity-50 cursor-wait' : ''} ${v === val ? 'border-indigo-500' : 'border-transparent'} ${cellBg(v)}`}
+                    title={RATING_LABELS[v]}
+                  >
+                    {v}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setEditingCell(null)}
+                  disabled={saving}
+                  className="ml-1 w-5 h-7 text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                  title="Cancel (Esc)"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          }
+          return (
+            <button
+              onClick={() => setEditingCell({ memberId: row.original.id, nodeId: node.id })}
+              className={`w-9 h-9 rounded text-sm font-semibold transition-colors ${cellBg(val)}`}
+              title={`${RATING_LABELS[val]} — click to edit`}
+            >
+              {val > 0 ? val : ''}
+            </button>
+          );
+        },
+      })),
+    ],
+    [leafNodes, editingCell, saving, getEntry, handleCellClick]
+  );
 
   const table = useReactTable({
     data: filteredTeam,
@@ -199,36 +241,12 @@ const Matrices: React.FC = () => {
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
           />
 
-          {showNewSnapshot ? (
-            <div className="flex items-center gap-2">
-              <input
-                value={newSnapshotLabel}
-                onChange={(e) => setNewSnapshotLabel(e.target.value)}
-                placeholder="Snapshot label…"
-                onKeyDown={(e) => e.key === 'Enter' && handleCreateSnapshot()}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              />
-              <button
-                onClick={handleCreateSnapshot}
-                className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
-              >
-                Create
-              </button>
-              <button
-                onClick={() => setShowNewSnapshot(false)}
-                className="px-3 py-2 text-gray-500 rounded-lg text-sm hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setShowNewSnapshot(true)}
+          <button
+              onClick={handleCreateSnapshot}
               className="flex items-center gap-1.5 px-3 py-2 text-sm text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50"
             >
               <Plus size={14} /> New Snapshot
             </button>
-          )}
         </div>
 
         {!currentSnapshotId && (

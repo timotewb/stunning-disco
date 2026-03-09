@@ -42,9 +42,10 @@ export const deleteNode = (id: string) => api.delete(`/dimension-nodes/${id}`);
 
 // Snapshots
 export const getSnapshots = () => api.get<Snapshot[]>('/snapshots').then((r) => r.data);
-export const createSnapshot = (data: { timestamp?: string; label: string }) =>
-  api.post<Snapshot>('/snapshots', data).then((r) => r.data);
+export const createSnapshot = (data?: { timestamp?: string }) =>
+  api.post<Snapshot>('/snapshots', data ?? {}).then((r) => r.data);
 export const deleteSnapshot = (id: string) => api.delete(`/snapshots/${id}`);
+export const deleteSnapshots = (ids: string[]) => api.delete('/snapshots/bulk', { data: { ids } });
 
 // Matrix
 export const getMatrix = (params: { dimensionId?: string; snapshotId?: string }) =>

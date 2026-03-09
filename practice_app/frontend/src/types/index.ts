@@ -28,7 +28,6 @@ export interface DimensionNode {
 export interface Snapshot {
   id: string;
   timestamp: string;
-  label: string;
 }
 
 export interface MatrixEntry {
