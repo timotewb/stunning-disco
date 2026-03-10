@@ -121,7 +121,7 @@ export const saveMemberNote = (slug: string, date: string, content: string) =>
 export const searchMemberNotes = (slug: string, q: string) =>
   api.get<NoteSearchResult[]>(`/notes/members/${slug}/search`, { params: { q } }).then((r) => r.data);
 
-// Folder notes
+// Folder notes (global — Folders tab)
 export const getFolders = () =>
   api.get<Folder[]>('/notes/folders').then((r) => r.data);
 export const createFolder = (name: string) =>
@@ -143,5 +143,39 @@ export const deleteFolderNote = (folderSlug: string, noteSlug: string) =>
 export const moveFolderNote = (folderSlug: string, noteSlug: string, targetFolderSlug: string) =>
   api.post<{ ok: boolean; newSlug: string; targetFolderSlug: string }>(
     `/notes/folders/${folderSlug}/notes/${noteSlug}/move`,
+    { targetFolderSlug }
+  ).then((r) => r.data);
+
+// Context folders (inline within Daily Notes or Team Member Notes sidebars)
+const ctxBase = (ctx: 'daily' | 'member', memberSlug?: string) =>
+  ctx === 'daily' ? '/notes/daily-folders' : `/notes/members/${memberSlug}/folders`;
+
+export const getCtxFolders = (ctx: 'daily' | 'member', memberSlug?: string) =>
+  api.get<Folder[]>(ctxBase(ctx, memberSlug)).then((r) => r.data);
+export const createCtxFolder = (ctx: 'daily' | 'member', name: string, memberSlug?: string) =>
+  api.post<Folder>(ctxBase(ctx, memberSlug), { name }).then((r) => r.data);
+export const renameCtxFolder = (ctx: 'daily' | 'member', folderSlug: string, name: string, memberSlug?: string) =>
+  api.patch<{ slug: string; name: string }>(`${ctxBase(ctx, memberSlug)}/${folderSlug}`, { name }).then((r) => r.data);
+export const deleteCtxFolder = (ctx: 'daily' | 'member', folderSlug: string, memberSlug?: string) =>
+  api.delete(`${ctxBase(ctx, memberSlug)}/${folderSlug}`);
+export const createCtxFolderNote = (ctx: 'daily' | 'member', folderSlug: string, name: string, memberSlug?: string) =>
+  api.post<FolderNoteContent>(`${ctxBase(ctx, memberSlug)}/${folderSlug}/notes`, { name }).then((r) => r.data);
+export const getCtxFolderNote = (ctx: 'daily' | 'member', folderSlug: string, noteSlug: string, memberSlug?: string) =>
+  api.get<FolderNoteContent>(`${ctxBase(ctx, memberSlug)}/${folderSlug}/notes/${noteSlug}`).then((r) => r.data);
+export const saveCtxFolderNote = (ctx: 'daily' | 'member', folderSlug: string, noteSlug: string, content: string, memberSlug?: string) =>
+  api.put<FolderNoteContent>(`${ctxBase(ctx, memberSlug)}/${folderSlug}/notes/${noteSlug}`, { content }).then((r) => r.data);
+export const renameCtxFolderNote = (ctx: 'daily' | 'member', folderSlug: string, noteSlug: string, name: string, memberSlug?: string) =>
+  api.patch<FolderNote>(`${ctxBase(ctx, memberSlug)}/${folderSlug}/notes/${noteSlug}`, { name }).then((r) => r.data);
+export const deleteCtxFolderNote = (ctx: 'daily' | 'member', folderSlug: string, noteSlug: string, memberSlug?: string) =>
+  api.delete(`${ctxBase(ctx, memberSlug)}/${folderSlug}/notes/${noteSlug}`);
+export const moveCtxFolderNote = (
+  ctx: 'daily' | 'member',
+  folderSlug: string,
+  noteSlug: string,
+  targetFolderSlug: string,
+  memberSlug?: string,
+) =>
+  api.post<{ ok: boolean; newSlug: string; targetFolderSlug: string }>(
+    `${ctxBase(ctx, memberSlug)}/${folderSlug}/notes/${noteSlug}/move`,
     { targetFolderSlug }
   ).then((r) => r.data);

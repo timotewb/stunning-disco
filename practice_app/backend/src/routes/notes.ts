@@ -4,6 +4,8 @@ import path from 'path';
 
 const router = Router();
 
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
 function getNotesDir(): string {
   const dbUrl = process.env.DATABASE_URL ?? 'file:/app/data/practice.db';
   const dbPath = dbUrl.replace(/^file:/, '');
@@ -15,10 +17,7 @@ function getNotesDir(): string {
 
 /** Sanitise a team member name to a safe directory slug: lowercase [a-z0-9_] only */
 export function nameToSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
 function dateToFilePath(date: string, notesDir: string): string {
@@ -27,25 +26,17 @@ function dateToFilePath(date: string, notesDir: string): string {
 }
 
 function ensureDir(dir: string): void {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
 function allNoteFiles(notesDir: string): { date: string; filePath: string }[] {
   if (!fs.existsSync(notesDir)) return [];
   const results: { date: string; filePath: string }[] = [];
-  const monthDirs = fs.readdirSync(notesDir)
-    .filter((d) => /^\d{6}$/.test(d))
-    .sort()
-    .reverse();
+  const monthDirs = fs.readdirSync(notesDir).filter((d) => /^\d{6}$/.test(d)).sort().reverse();
   for (const monthDir of monthDirs) {
     const monthPath = path.join(notesDir, monthDir);
     if (!fs.statSync(monthPath).isDirectory()) continue;
-    const files = fs.readdirSync(monthPath)
-      .filter((f) => /^\d{4}-\d{2}-\d{2}\.md$/.test(f))
-      .sort()
-      .reverse();
+    const files = fs.readdirSync(monthPath).filter((f) => /^\d{4}-\d{2}-\d{2}\.md$/.test(f)).sort().reverse();
     for (const file of files) {
       results.push({ date: file.replace('.md', ''), filePath: path.join(monthPath, file) });
     }
@@ -58,8 +49,7 @@ function searchInDir(notesDir: string, q: string): { date: string; snippet: stri
   const results: { date: string; snippet: string }[] = [];
   for (const { date, filePath } of allNoteFiles(notesDir)) {
     const content = fs.readFileSync(filePath, 'utf-8');
-    const lowerContent = content.toLowerCase();
-    const idx = lowerContent.indexOf(lower);
+    const idx = content.toLowerCase().indexOf(lower);
     if (idx !== -1) {
       const start = Math.max(0, idx - 60);
       const end = Math.min(content.length, idx + lower.length + 60);
@@ -73,284 +63,23 @@ function searchInDir(notesDir: string, q: string): { date: string; snippet: stri
   return results;
 }
 
-// ── Daily notes ──────────────────────────────────────────────────────────────
-
-// GET /api/notes — list all note dates newest first
-router.get('/', (_req: Request, res: Response) => {
-  try {
-    const notes = allNoteFiles(getNotesDir()).map(({ date }) => ({ date }));
-    res.json(notes);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// GET /api/notes/search?q=... — keyword search across daily notes
-router.get('/search', (req: Request, res: Response) => {
-  try {
-    const q = String(req.query.q ?? '').trim();
-    if (!q) return res.json([]);
-    res.json(searchInDir(getNotesDir(), q));
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// ── Folder notes — registered BEFORE /:date to prevent wildcard collision ────
-
-// GET /api/notes/folders — list all folders and their notes
-router.get('/folders', (_req: Request, res: Response) => {
-  try {
-    res.json(listFolders());
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// POST /api/notes/folders — create folder { name }
-router.post('/folders', (req: Request, res: Response) => {
-  try {
-    const { name } = req.body as { name?: string };
-    if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-    const base = nameToFolderSlug(name.trim());
-    const existingSlugs = new Set(listFolders().map((f) => f.slug));
-    const slug = uniqueSlug(base, (s) => existingSlugs.has(s));
-    const dir = folderDir(slug);
-    ensureDir(dir);
-    writeFolderMeta(slug, { name: name.trim(), notes: {} });
-    res.status(201).json({ slug, name: name.trim(), notes: [] });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// PATCH /api/notes/folders/:folderSlug — rename folder { name }
-router.patch('/folders/:folderSlug', (req: Request, res: Response) => {
-  try {
-    const folderSlug = String(req.params.folderSlug);
-    if (!validateFolderSlug(folderSlug)) return res.status(400).json({ error: 'Invalid folder slug' });
-    if (!fs.existsSync(folderDir(folderSlug))) return res.status(404).json({ error: 'Folder not found' });
-    const { name } = req.body as { name?: string };
-    if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-    const meta = readFolderMeta(folderSlug);
-    meta.name = name.trim();
-    writeFolderMeta(folderSlug, meta);
-    res.json({ slug: folderSlug, name: meta.name });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// DELETE /api/notes/folders/:folderSlug — delete folder and all contents
-router.delete('/folders/:folderSlug', (req: Request, res: Response) => {
-  try {
-    const folderSlug = String(req.params.folderSlug);
-    if (!validateFolderSlug(folderSlug)) return res.status(400).json({ error: 'Invalid folder slug' });
-    const dir = folderDir(folderSlug);
-    if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Folder not found' });
-    fs.rmSync(dir, { recursive: true, force: true });
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// POST /api/notes/folders/:folderSlug/notes — create note { name }
-router.post('/folders/:folderSlug/notes', (req: Request, res: Response) => {
-  try {
-    const folderSlug = String(req.params.folderSlug);
-    if (!validateFolderSlug(folderSlug)) return res.status(400).json({ error: 'Invalid folder slug' });
-    if (!fs.existsSync(folderDir(folderSlug))) return res.status(404).json({ error: 'Folder not found' });
-    const { name } = req.body as { name?: string };
-    if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-    const meta = readFolderMeta(folderSlug);
-    const base = nameToFolderSlug(name.trim());
-    const noteSlug = uniqueSlug(base, (s) => s in meta.notes);
-    meta.notes[noteSlug] = name.trim();
-    writeFolderMeta(folderSlug, meta);
-    fs.writeFileSync(path.join(folderDir(folderSlug), `${noteSlug}.md`), '', 'utf-8');
-    res.status(201).json({ slug: noteSlug, name: name.trim(), content: '' });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// GET /api/notes/folders/:folderSlug/notes/:noteSlug — get note content
-router.get('/folders/:folderSlug/notes/:noteSlug', (req: Request, res: Response) => {
-  try {
-    const folderSlug = String(req.params.folderSlug);
-    const noteSlug = String(req.params.noteSlug);
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) {
-      return res.status(400).json({ error: 'Invalid slug' });
-    }
-    if (!fs.existsSync(folderDir(folderSlug))) return res.status(404).json({ error: 'Folder not found' });
-    const meta = readFolderMeta(folderSlug);
-    const notePath = path.join(folderDir(folderSlug), `${noteSlug}.md`);
-    const content = fs.existsSync(notePath) ? fs.readFileSync(notePath, 'utf-8') : '';
-    res.json({ slug: noteSlug, name: meta.notes[noteSlug] ?? noteSlug, content });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// PUT /api/notes/folders/:folderSlug/notes/:noteSlug — save note content
-router.put('/folders/:folderSlug/notes/:noteSlug', (req: Request, res: Response) => {
-  try {
-    const folderSlug = String(req.params.folderSlug);
-    const noteSlug = String(req.params.noteSlug);
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) {
-      return res.status(400).json({ error: 'Invalid slug' });
-    }
-    if (!fs.existsSync(folderDir(folderSlug))) return res.status(404).json({ error: 'Folder not found' });
-    const { content = '' } = req.body as { content?: string };
-    const meta = readFolderMeta(folderSlug);
-    const notePath = path.join(folderDir(folderSlug), `${noteSlug}.md`);
-    fs.writeFileSync(notePath, content, 'utf-8');
-    res.json({ slug: noteSlug, name: meta.notes[noteSlug] ?? noteSlug, content });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// PATCH /api/notes/folders/:folderSlug/notes/:noteSlug — rename note { name }
-router.patch('/folders/:folderSlug/notes/:noteSlug', (req: Request, res: Response) => {
-  try {
-    const folderSlug = String(req.params.folderSlug);
-    const noteSlug = String(req.params.noteSlug);
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) {
-      return res.status(400).json({ error: 'Invalid slug' });
-    }
-    if (!fs.existsSync(folderDir(folderSlug))) return res.status(404).json({ error: 'Folder not found' });
-    const { name } = req.body as { name?: string };
-    if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-    const meta = readFolderMeta(folderSlug);
-    if (!(noteSlug in meta.notes)) return res.status(404).json({ error: 'Note not found' });
-    meta.notes[noteSlug] = name.trim();
-    writeFolderMeta(folderSlug, meta);
-    res.json({ slug: noteSlug, name: name.trim() });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// DELETE /api/notes/folders/:folderSlug/notes/:noteSlug — delete note
-router.delete('/folders/:folderSlug/notes/:noteSlug', (req: Request, res: Response) => {
-  try {
-    const folderSlug = String(req.params.folderSlug);
-    const noteSlug = String(req.params.noteSlug);
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) {
-      return res.status(400).json({ error: 'Invalid slug' });
-    }
-    if (!fs.existsSync(folderDir(folderSlug))) return res.status(404).json({ error: 'Folder not found' });
-    const meta = readFolderMeta(folderSlug);
-    delete meta.notes[noteSlug];
-    writeFolderMeta(folderSlug, meta);
-    const notePath = path.join(folderDir(folderSlug), `${noteSlug}.md`);
-    if (fs.existsSync(notePath)) fs.unlinkSync(notePath);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// POST /api/notes/folders/:folderSlug/notes/:noteSlug/move — move note { targetFolderSlug }
-router.post('/folders/:folderSlug/notes/:noteSlug/move', (req: Request, res: Response) => {
-  try {
-    const folderSlug = String(req.params.folderSlug);
-    const noteSlug = String(req.params.noteSlug);
-    const { targetFolderSlug } = req.body as { targetFolderSlug?: string };
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) {
-      return res.status(400).json({ error: 'Invalid slug' });
-    }
-    if (!targetFolderSlug || !validateFolderSlug(targetFolderSlug)) {
-      return res.status(400).json({ error: 'targetFolderSlug is required' });
-    }
-    if (folderSlug === targetFolderSlug) return res.status(400).json({ error: 'Source and target are the same' });
-    if (!fs.existsSync(folderDir(folderSlug))) return res.status(404).json({ error: 'Source folder not found' });
-    if (!fs.existsSync(folderDir(targetFolderSlug))) return res.status(404).json({ error: 'Target folder not found' });
-    const srcMeta = readFolderMeta(folderSlug);
-    if (!(noteSlug in srcMeta.notes)) return res.status(404).json({ error: 'Note not found' });
-    const noteName = srcMeta.notes[noteSlug];
-    const tgtMeta = readFolderMeta(targetFolderSlug);
-    const newSlug = uniqueSlug(noteSlug, (s) => s in tgtMeta.notes);
-    const srcPath = path.join(folderDir(folderSlug), `${noteSlug}.md`);
-    const tgtPath = path.join(folderDir(targetFolderSlug), `${newSlug}.md`);
-    const content = fs.existsSync(srcPath) ? fs.readFileSync(srcPath, 'utf-8') : '';
-    fs.writeFileSync(tgtPath, content, 'utf-8');
-    tgtMeta.notes[newSlug] = noteName;
-    writeFolderMeta(targetFolderSlug, tgtMeta);
-    delete srcMeta.notes[noteSlug];
-    writeFolderMeta(folderSlug, srcMeta);
-    if (fs.existsSync(srcPath)) fs.unlinkSync(srcPath);
-    res.json({ ok: true, newSlug, targetFolderSlug });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// GET /api/notes/:date — get daily note content
-router.get('/:date', (req: Request, res: Response) => {
-  try {
-    const date = String(req.params.date);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return res.status(400).json({ error: 'Invalid date format, expected yyyy-mm-dd' });
-    }
-    const filePath = dateToFilePath(date, getNotesDir());
-    const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
-    res.json({ date, content });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// PUT /api/notes/:date — create or overwrite a daily note
-router.put('/:date', (req: Request, res: Response) => {
-  try {
-    const date = String(req.params.date);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return res.status(400).json({ error: 'Invalid date format, expected yyyy-mm-dd' });
-    }
-    const { content = '' } = req.body;
-    const filePath = dateToFilePath(date, getNotesDir());
-    ensureDir(path.dirname(filePath));
-    fs.writeFileSync(filePath, content, 'utf-8');
-    res.json({ date, content });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// ── Folder notes helpers ──────────────────────────────────────────────────────
+// ── Folder helpers (parameterized) ───────────────────────────────────────────
 
 interface FolderMeta {
   name: string;
   notes: Record<string, string>; // slug → display name
 }
 
-function foldersDir(): string {
-  return path.join(getNotesDir(), 'folders');
-}
-
-function folderDir(folderSlug: string): string {
-  return path.join(foldersDir(), folderSlug);
-}
-
-function folderMetaPath(folderSlug: string): string {
-  return path.join(folderDir(folderSlug), '_meta.json');
-}
-
-function readFolderMeta(folderSlug: string): FolderMeta {
-  const p = folderMetaPath(folderSlug);
-  if (!fs.existsSync(p)) return { name: folderSlug, notes: {} };
-  try { return JSON.parse(fs.readFileSync(p, 'utf-8')) as FolderMeta; } catch { return { name: folderSlug, notes: {} }; }
-}
-
-function writeFolderMeta(folderSlug: string, meta: FolderMeta): void {
-  fs.writeFileSync(folderMetaPath(folderSlug), JSON.stringify(meta, null, 2), 'utf-8');
+class HttpError extends Error {
+  constructor(public status: number, message: string) { super(message); }
 }
 
 function nameToFolderSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'folder';
+}
+
+function validateFolderSlug(slug: string): boolean {
+  return /^[a-z0-9_]+$/.test(slug);
 }
 
 function uniqueSlug(base: string, exists: (s: string) => boolean): string {
@@ -360,27 +89,233 @@ function uniqueSlug(base: string, exists: (s: string) => boolean): string {
   return `${base}_${i}`;
 }
 
-function validateFolderSlug(slug: string): boolean {
-  return /^[a-z0-9_]+$/.test(slug);
+function readFolderMetaAt(baseDir: string, slug: string): FolderMeta {
+  const p = path.join(baseDir, slug, '_meta.json');
+  if (!fs.existsSync(p)) return { name: slug, notes: {} };
+  try { return JSON.parse(fs.readFileSync(p, 'utf-8')) as FolderMeta; } catch { return { name: slug, notes: {} }; }
 }
 
-function listFolders(): { slug: string; name: string; notes: { slug: string; name: string }[] }[] {
-  const dir = foldersDir();
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter((d) => {
-      const full = path.join(dir, d);
-      return fs.statSync(full).isDirectory() && validateFolderSlug(d);
-    })
+function writeFolderMetaAt(baseDir: string, slug: string, meta: FolderMeta): void {
+  fs.writeFileSync(path.join(baseDir, slug, '_meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
+}
+
+function listFoldersAt(baseDir: string): { slug: string; name: string; notes: { slug: string; name: string }[] }[] {
+  if (!fs.existsSync(baseDir)) return [];
+  return fs.readdirSync(baseDir)
+    .filter((d) => fs.statSync(path.join(baseDir, d)).isDirectory() && validateFolderSlug(d))
     .sort()
     .map((slug) => {
-      const meta = readFolderMeta(slug);
+      const meta = readFolderMetaAt(baseDir, slug);
       const notes = Object.entries(meta.notes).map(([s, n]) => ({ slug: s, name: n }));
       return { slug, name: meta.name, notes };
     });
 }
 
-// ── Member notes ─────────────────────────────────────────────────────────────
+/**
+ * Register folder CRUD routes at the given prefix.
+ * getBaseDir receives the request and returns the filesystem base directory for
+ * that context, or throws HttpError for invalid params.
+ */
+function registerFolderCRUD(
+  r: Router,
+  prefix: string,
+  getBaseDir: (req: Request) => string,
+): void {
+  const handle = (fn: (req: Request, res: Response) => void) =>
+    (req: Request, res: Response) => {
+      try { fn(req, res); }
+      catch (err) {
+        if (err instanceof HttpError) res.status(err.status).json({ error: err.message });
+        else res.status(500).json({ error: String(err) });
+      }
+    };
+
+  // GET prefix — list folders
+  r.get(prefix, handle((req, res) => res.json(listFoldersAt(getBaseDir(req)))));
+
+  // POST prefix — create folder
+  r.post(prefix, handle((req, res) => {
+    const { name } = req.body as { name?: string };
+    if (!name?.trim()) throw new HttpError(400, 'name is required');
+    const baseDir = getBaseDir(req);
+    const base = nameToFolderSlug(name.trim());
+    const slug = uniqueSlug(base, (s) => new Set(listFoldersAt(baseDir).map((f) => f.slug)).has(s));
+    ensureDir(path.join(baseDir, slug));
+    writeFolderMetaAt(baseDir, slug, { name: name.trim(), notes: {} });
+    res.status(201).json({ slug, name: name.trim(), notes: [] });
+  }));
+
+  // PATCH prefix/:folderSlug — rename folder
+  r.patch(`${prefix}/:folderSlug`, handle((req, res) => {
+    const folderSlug = String(req.params.folderSlug);
+    if (!validateFolderSlug(folderSlug)) throw new HttpError(400, 'Invalid folder slug');
+    const baseDir = getBaseDir(req);
+    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const { name } = req.body as { name?: string };
+    if (!name?.trim()) throw new HttpError(400, 'name is required');
+    const meta = readFolderMetaAt(baseDir, folderSlug);
+    meta.name = name.trim();
+    writeFolderMetaAt(baseDir, folderSlug, meta);
+    res.json({ slug: folderSlug, name: meta.name });
+  }));
+
+  // DELETE prefix/:folderSlug — delete folder
+  r.delete(`${prefix}/:folderSlug`, handle((req, res) => {
+    const folderSlug = String(req.params.folderSlug);
+    if (!validateFolderSlug(folderSlug)) throw new HttpError(400, 'Invalid folder slug');
+    const baseDir = getBaseDir(req);
+    const dir = path.join(baseDir, folderSlug);
+    if (!fs.existsSync(dir)) throw new HttpError(404, 'Folder not found');
+    fs.rmSync(dir, { recursive: true, force: true });
+    res.json({ ok: true });
+  }));
+
+  // POST prefix/:folderSlug/notes — create note
+  r.post(`${prefix}/:folderSlug/notes`, handle((req, res) => {
+    const folderSlug = String(req.params.folderSlug);
+    if (!validateFolderSlug(folderSlug)) throw new HttpError(400, 'Invalid folder slug');
+    const baseDir = getBaseDir(req);
+    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const { name } = req.body as { name?: string };
+    if (!name?.trim()) throw new HttpError(400, 'name is required');
+    const meta = readFolderMetaAt(baseDir, folderSlug);
+    const noteSlug = uniqueSlug(nameToFolderSlug(name.trim()), (s) => s in meta.notes);
+    meta.notes[noteSlug] = name.trim();
+    writeFolderMetaAt(baseDir, folderSlug, meta);
+    fs.writeFileSync(path.join(baseDir, folderSlug, `${noteSlug}.md`), '', 'utf-8');
+    res.status(201).json({ slug: noteSlug, name: name.trim(), content: '' });
+  }));
+
+  // GET prefix/:folderSlug/notes/:noteSlug — get note content
+  r.get(`${prefix}/:folderSlug/notes/:noteSlug`, handle((req, res) => {
+    const folderSlug = String(req.params.folderSlug);
+    const noteSlug = String(req.params.noteSlug);
+    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    const baseDir = getBaseDir(req);
+    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const meta = readFolderMetaAt(baseDir, folderSlug);
+    const notePath = path.join(baseDir, folderSlug, `${noteSlug}.md`);
+    const content = fs.existsSync(notePath) ? fs.readFileSync(notePath, 'utf-8') : '';
+    res.json({ slug: noteSlug, name: meta.notes[noteSlug] ?? noteSlug, content });
+  }));
+
+  // PUT prefix/:folderSlug/notes/:noteSlug — save note content
+  r.put(`${prefix}/:folderSlug/notes/:noteSlug`, handle((req, res) => {
+    const folderSlug = String(req.params.folderSlug);
+    const noteSlug = String(req.params.noteSlug);
+    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    const baseDir = getBaseDir(req);
+    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const { content = '' } = req.body as { content?: string };
+    const meta = readFolderMetaAt(baseDir, folderSlug);
+    fs.writeFileSync(path.join(baseDir, folderSlug, `${noteSlug}.md`), content, 'utf-8');
+    res.json({ slug: noteSlug, name: meta.notes[noteSlug] ?? noteSlug, content });
+  }));
+
+  // PATCH prefix/:folderSlug/notes/:noteSlug — rename note
+  r.patch(`${prefix}/:folderSlug/notes/:noteSlug`, handle((req, res) => {
+    const folderSlug = String(req.params.folderSlug);
+    const noteSlug = String(req.params.noteSlug);
+    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    const baseDir = getBaseDir(req);
+    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const { name } = req.body as { name?: string };
+    if (!name?.trim()) throw new HttpError(400, 'name is required');
+    const meta = readFolderMetaAt(baseDir, folderSlug);
+    if (!(noteSlug in meta.notes)) throw new HttpError(404, 'Note not found');
+    meta.notes[noteSlug] = name.trim();
+    writeFolderMetaAt(baseDir, folderSlug, meta);
+    res.json({ slug: noteSlug, name: name.trim() });
+  }));
+
+  // DELETE prefix/:folderSlug/notes/:noteSlug — delete note
+  r.delete(`${prefix}/:folderSlug/notes/:noteSlug`, handle((req, res) => {
+    const folderSlug = String(req.params.folderSlug);
+    const noteSlug = String(req.params.noteSlug);
+    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    const baseDir = getBaseDir(req);
+    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const meta = readFolderMetaAt(baseDir, folderSlug);
+    delete meta.notes[noteSlug];
+    writeFolderMetaAt(baseDir, folderSlug, meta);
+    const notePath = path.join(baseDir, folderSlug, `${noteSlug}.md`);
+    if (fs.existsSync(notePath)) fs.unlinkSync(notePath);
+    res.json({ ok: true });
+  }));
+
+  // POST prefix/:folderSlug/notes/:noteSlug/move — move note
+  r.post(`${prefix}/:folderSlug/notes/:noteSlug/move`, handle((req, res) => {
+    const folderSlug = String(req.params.folderSlug);
+    const noteSlug = String(req.params.noteSlug);
+    const { targetFolderSlug } = req.body as { targetFolderSlug?: string };
+    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    if (!targetFolderSlug || !validateFolderSlug(targetFolderSlug)) throw new HttpError(400, 'targetFolderSlug is required');
+    if (folderSlug === targetFolderSlug) throw new HttpError(400, 'Source and target are the same');
+    const baseDir = getBaseDir(req);
+    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Source folder not found');
+    if (!fs.existsSync(path.join(baseDir, targetFolderSlug))) throw new HttpError(404, 'Target folder not found');
+    const srcMeta = readFolderMetaAt(baseDir, folderSlug);
+    if (!(noteSlug in srcMeta.notes)) throw new HttpError(404, 'Note not found');
+    const noteName = srcMeta.notes[noteSlug];
+    const tgtMeta = readFolderMetaAt(baseDir, targetFolderSlug);
+    const newSlug = uniqueSlug(noteSlug, (s) => s in tgtMeta.notes);
+    const srcPath = path.join(baseDir, folderSlug, `${noteSlug}.md`);
+    const content = fs.existsSync(srcPath) ? fs.readFileSync(srcPath, 'utf-8') : '';
+    fs.writeFileSync(path.join(baseDir, targetFolderSlug, `${newSlug}.md`), content, 'utf-8');
+    tgtMeta.notes[newSlug] = noteName;
+    writeFolderMetaAt(baseDir, targetFolderSlug, tgtMeta);
+    delete srcMeta.notes[noteSlug];
+    writeFolderMetaAt(baseDir, folderSlug, srcMeta);
+    if (fs.existsSync(srcPath)) fs.unlinkSync(srcPath);
+    res.json({ ok: true, newSlug, targetFolderSlug });
+  }));
+}
+
+// ── Route registrations ───────────────────────────────────────────────────────
+// Order matters: specific paths MUST come before wildcard /:date or /:slug/:date
+
+// Daily notes list + search
+router.get('/', (_req, res) => {
+  try { res.json(allNoteFiles(getNotesDir()).map(({ date }) => ({ date }))); }
+  catch (err) { res.status(500).json({ error: String(err) }); }
+});
+router.get('/search', (req, res) => {
+  try {
+    const q = String(req.query.q ?? '').trim();
+    if (!q) return res.json([]);
+    res.json(searchInDir(getNotesDir(), q));
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// Global folders tab  ← must be before /:date
+registerFolderCRUD(router, '/folders', () => path.join(getNotesDir(), 'folders'));
+
+// Daily-context folders  ← must be before /:date
+registerFolderCRUD(router, '/daily-folders', () => path.join(getNotesDir(), 'daily_folders'));
+
+// Daily note wildcard routes
+router.get('/:date', (req, res) => {
+  try {
+    const date = String(req.params.date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date format, expected yyyy-mm-dd' });
+    const filePath = dateToFilePath(date, getNotesDir());
+    const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
+    res.json({ date, content });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+router.put('/:date', (req, res) => {
+  try {
+    const date = String(req.params.date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date format, expected yyyy-mm-dd' });
+    const { content = '' } = req.body;
+    const filePath = dateToFilePath(date, getNotesDir());
+    ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, content, 'utf-8');
+    res.json({ date, content });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// ── Member notes ──────────────────────────────────────────────────────────────
 
 function memberNotesDir(slug: string): string {
   return path.join(getNotesDir(), 'members', slug);
@@ -390,65 +325,55 @@ function validateSlug(slug: string): boolean {
   return /^[a-z0-9_]+$/.test(slug);
 }
 
-// GET /api/notes/members/:slug — list all note dates for a member
-router.get('/members/:slug', (req: Request, res: Response) => {
+// Member list + search  ← before member /:date wildcard
+router.get('/members/:slug', (req, res) => {
   try {
     const slug = String(req.params.slug);
     if (!validateSlug(slug)) return res.status(400).json({ error: 'Invalid slug' });
-    const notes = allNoteFiles(memberNotesDir(slug)).map(({ date }) => ({ date }));
-    res.json(notes);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
+    res.json(allNoteFiles(memberNotesDir(slug)).map(({ date }) => ({ date })));
+  } catch (err) { res.status(500).json({ error: String(err) }); }
 });
-
-// GET /api/notes/members/:slug/search?q= — search member notes
-router.get('/members/:slug/search', (req: Request, res: Response) => {
+router.get('/members/:slug/search', (req, res) => {
   try {
     const slug = String(req.params.slug);
     if (!validateSlug(slug)) return res.status(400).json({ error: 'Invalid slug' });
     const q = String(req.query.q ?? '').trim();
     if (!q) return res.json([]);
     res.json(searchInDir(memberNotesDir(slug), q));
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
+  } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
-// GET /api/notes/members/:slug/:date — get member note content
-router.get('/members/:slug/:date', (req: Request, res: Response) => {
+// Member-context folders  ← must be before /members/:slug/:date
+registerFolderCRUD(router, '/members/:memberSlug/folders', (req) => {
+  const memberSlug = String(req.params.memberSlug);
+  if (!validateSlug(memberSlug)) throw new HttpError(400, 'Invalid member slug');
+  return path.join(getNotesDir(), 'members', memberSlug, 'folders');
+});
+
+// Member date wildcard routes
+router.get('/members/:slug/:date', (req, res) => {
   try {
     const slug = String(req.params.slug);
     const date = String(req.params.date);
     if (!validateSlug(slug)) return res.status(400).json({ error: 'Invalid slug' });
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return res.status(400).json({ error: 'Invalid date format, expected yyyy-mm-dd' });
-    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date format, expected yyyy-mm-dd' });
     const filePath = dateToFilePath(date, memberNotesDir(slug));
     const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
     res.json({ date, content });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
+  } catch (err) { res.status(500).json({ error: String(err) }); }
 });
-
-// PUT /api/notes/members/:slug/:date — create or overwrite member note
-router.put('/members/:slug/:date', (req: Request, res: Response) => {
+router.put('/members/:slug/:date', (req, res) => {
   try {
     const slug = String(req.params.slug);
     const date = String(req.params.date);
     if (!validateSlug(slug)) return res.status(400).json({ error: 'Invalid slug' });
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return res.status(400).json({ error: 'Invalid date format, expected yyyy-mm-dd' });
-    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date format, expected yyyy-mm-dd' });
     const { content = '' } = req.body;
     const filePath = dateToFilePath(date, memberNotesDir(slug));
     ensureDir(path.dirname(filePath));
     fs.writeFileSync(filePath, content, 'utf-8');
     res.json({ date, content });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
+  } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
 export default router;
