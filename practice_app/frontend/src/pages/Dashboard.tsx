@@ -98,29 +98,6 @@ const Dashboard: React.FC = () => {
         <StatCard icon={<Star size={22} />} label="SME Assignments" value={sme.length} />
       </div>
 
-      {/* Capability Coverage */}
-      {coverageData.length > 0 && (
-        <section>
-          <h3 className="text-lg font-semibold mb-4 text-gray-800">Capability Coverage</h3>
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-            {coverageData.map(({ name, avg, max }) => (
-              <div key={name}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-gray-700">{name}</span>
-                  <span className="text-gray-500">{avg.toFixed(1)} / {max}</span>
-                </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-indigo-500 rounded-full transition-all"
-                    style={{ width: `${(avg / max) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* Current week allocations */}
       <section>
         <h3 className="text-lg font-semibold mb-4 text-gray-800">
@@ -146,6 +123,29 @@ const Dashboard: React.FC = () => {
           </div>
         )}
       </section>
+
+      {/* Capability Coverage */}
+      {coverageData.length > 0 && (
+        <section>
+          <h3 className="text-lg font-semibold mb-4 text-gray-800">Capability Coverage</h3>
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+            {coverageData.map(({ name, avg, max }) => (
+              <div key={name}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-gray-700">{name}</span>
+                  <span className="text-gray-500">{avg.toFixed(1)} / {max}</span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 rounded-full transition-all"
+                    style={{ width: `${(avg / max) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 };
