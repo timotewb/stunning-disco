@@ -264,7 +264,6 @@ const Settings: React.FC = () => {
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
           >
             <option value="skills">Skills</option>
-            <option value="competency">Competency</option>
             <option value="knowledge">Knowledge</option>
           </select>
           <button
