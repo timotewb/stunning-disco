@@ -1,6 +1,5 @@
 
-- allocation types shoudl be configurable in settings. i.e. i can add or remove allocation types. if i remove a type which is being used a default allocation type of "uncategorised" appears.
-- Seniority types should be configurable in the settings.
+
 - when the user enters a role name this will be saved so when the user enters the same role for another team member it will show up as an autocomplete option which can be clicked on to select it.
 - on the dashboard page the section "This Week" sholld be at the top under the key metrics (team size, active projects etc)
 - format the zero option in the Matricies view such that if zero is selected for a team member:dimension it is readable. currently the color is such that it is not visible at all. a slightly more visible grey would be appropriate.

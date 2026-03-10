@@ -1,14 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
-import type { TeamMember } from '../types';
-import { getTeam, createMember, updateMember, deleteMember } from '../api/client';
+import type { TeamMember, SeniorityConfig } from '../types';
+import { getTeam, createMember, updateMember, deleteMember, getSeniorityConfigs } from '../api/client';
 
-const SENIORITY_OPTIONS = ['Junior', 'Mid', 'Senior', 'Lead', 'Principal', 'Director'];
+const PRESET_BADGE_COLORS: Record<string, string> = {
+  indigo: 'bg-indigo-100 text-indigo-700',
+  amber:  'bg-amber-100 text-amber-700',
+  green:  'bg-green-100 text-green-700',
+  blue:   'bg-blue-100 text-blue-700',
+  purple: 'bg-purple-100 text-purple-700',
+  rose:   'bg-rose-100 text-rose-700',
+  teal:   'bg-teal-100 text-teal-700',
+  orange: 'bg-orange-100 text-orange-700',
+  cyan:   'bg-cyan-100 text-cyan-700',
+  pink:   'bg-pink-100 text-pink-700',
+  gray:   'bg-gray-100 text-gray-600',
+};
 
-const emptyForm = { name: '', role: '', seniority: 'Mid', tags: [] as string[], notes: '' };
+const emptyForm = { name: '', role: '', seniority: '', tags: [] as string[], notes: '' };
 
 const Team: React.FC = () => {
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [seniorityConfigs, setSeniorityConfigs] = useState<SeniorityConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -21,7 +34,9 @@ const Team: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      setMembers(await getTeam());
+      const [members, configs] = await Promise.all([getTeam(), getSeniorityConfigs()]);
+      setMembers(members);
+      setSeniorityConfigs(configs);
     } catch {
       setError('Failed to load team.');
     } finally {
@@ -31,6 +46,11 @@ const Team: React.FC = () => {
 
   useEffect(() => { load(); }, []);
 
+  const seniorityBadge = (seniority: string): string => {
+    const cfg = seniorityConfigs.find((s) => s.name === seniority);
+    return cfg ? (PRESET_BADGE_COLORS[cfg.color] ?? PRESET_BADGE_COLORS.gray) : PRESET_BADGE_COLORS.gray;
+  };
+
   const filtered = members.filter(
     (m) =>
       m.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -38,7 +58,7 @@ const Team: React.FC = () => {
   );
 
   const openAdd = () => {
-    setForm({ ...emptyForm });
+    setForm({ ...emptyForm, seniority: seniorityConfigs[0]?.name ?? '' });
     setTagInput('');
     setEditingId(null);
     setShowModal(true);
@@ -84,15 +104,6 @@ const Team: React.FC = () => {
     setTagInput('');
   };
 
-  const seniorityColor: Record<string, string> = {
-    Junior: 'bg-blue-100 text-blue-700',
-    Mid: 'bg-green-100 text-green-700',
-    Senior: 'bg-indigo-100 text-indigo-700',
-    Lead: 'bg-purple-100 text-purple-700',
-    Principal: 'bg-orange-100 text-orange-700',
-    Director: 'bg-red-100 text-red-700',
-  };
-
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
@@ -133,9 +144,9 @@ const Team: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <span className="font-semibold text-gray-900">{m.name}</span>
                     <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${seniorityColor[m.seniority] ?? 'bg-gray-100 text-gray-600'}`}
+                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${seniorityBadge(m.seniority)}`}
                     >
-                      {m.seniority}
+                      {m.seniority || '—'}
                     </span>
                   </div>
                   <div className="text-sm text-gray-500 mt-0.5">{m.role}</div>
@@ -214,8 +225,8 @@ const Team: React.FC = () => {
                   onChange={(e) => setForm((f) => ({ ...f, seniority: e.target.value }))}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 >
-                  {SENIORITY_OPTIONS.map((s) => (
-                    <option key={s}>{s}</option>
+                  {seniorityConfigs.map((s) => (
+                    <option key={s.name} value={s.name}>{s.name}</option>
                   ))}
                 </select>
               </Field>

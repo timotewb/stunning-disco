@@ -8,6 +8,7 @@ import snapshotsRouter from './routes/snapshots';
 import matrixRouter from './routes/matrix';
 import allocationsRouter from './routes/allocations';
 import allocationTypesRouter from './routes/allocationTypes';
+import seniorityConfigRouter from './routes/seniorityConfig';
 import smeRouter from './routes/sme';
 import exportRouter from './routes/export';
 
@@ -29,6 +30,7 @@ app.use('/api/matrix', matrixRouter);
 app.use('/api/matrix-entry', matrixRouter);
 app.use('/api/allocations', allocationsRouter);
 app.use('/api/allocation-types', allocationTypesRouter);
+app.use('/api/seniority-config', seniorityConfigRouter);
 app.use('/api/sme', smeRouter);
 app.use('/api/export', exportRouter);
 

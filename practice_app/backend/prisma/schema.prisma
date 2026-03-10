@@ -84,6 +84,13 @@ model AllocationTypeConfig {
   createdAt DateTime @default(now())
 }
 
+model SeniorityConfig {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String   @default("gray")
+  createdAt DateTime @default(now())
+}
+
 model SMEAssignment {
   id              String        @id @default(uuid())
   dimensionNodeId String

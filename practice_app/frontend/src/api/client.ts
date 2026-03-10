@@ -7,6 +7,7 @@ import type {
   MatrixEntry,
   Allocation,
   AllocationTypeConfig,
+  SeniorityConfig,
   SMEAssignment,
 } from '../types';
 
@@ -73,6 +74,13 @@ export const getAllocationTypes = () =>
 export const createAllocationType = (data: { name: string; color: string }) =>
   api.post<AllocationTypeConfig>('/allocation-types', data).then((r) => r.data);
 export const deleteAllocationType = (id: string) => api.delete(`/allocation-types/${id}`);
+
+// Seniority Config
+export const getSeniorityConfigs = () =>
+  api.get<SeniorityConfig[]>('/seniority-config').then((r) => r.data);
+export const createSeniorityConfig = (data: { name: string; color: string }) =>
+  api.post<SeniorityConfig>('/seniority-config', data).then((r) => r.data);
+export const deleteSeniorityConfig = (id: string) => api.delete(`/seniority-config/${id}`);
 
 // SME
 export const getSME = () => api.get<SMEAssignment[]>('/sme').then((r) => r.data);

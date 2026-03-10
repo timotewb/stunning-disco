@@ -59,6 +59,13 @@ export interface AllocationTypeConfig {
   createdAt: string;
 }
 
+export interface SeniorityConfig {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
 export interface SMEAssignment {
   id: string;
   dimensionNodeId: string;

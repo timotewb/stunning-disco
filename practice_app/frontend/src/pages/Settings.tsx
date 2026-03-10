@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown } from 'lucide-react';
-import type { Dimension, DimensionNode, Snapshot, AllocationTypeConfig } from '../types';
+import type { Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig } from '../types';
 import {
   getDimensions,
   createDimension,
@@ -15,6 +15,9 @@ import {
   getAllocationTypes,
   createAllocationType,
   deleteAllocationType,
+  getSeniorityConfigs,
+  createSeniorityConfig,
+  deleteSeniorityConfig,
 } from '../api/client';
 import { useSnapshot } from '../context/SnapshotContext';
 
@@ -43,6 +46,13 @@ const Settings: React.FC = () => {
   const [newTypeName, setNewTypeName] = useState('');
   const [newTypeColor, setNewTypeColor] = useState('gray');
   const [deleteConfirmType, setDeleteConfirmType] = useState<string | null>(null);
+
+  // Seniority config state
+  const [seniorityConfigs, setSeniorityConfigs] = useState<SeniorityConfig[]>([]);
+  const [seniorityLoading, setSeniorityLoading] = useState(true);
+  const [newSeniorityName, setNewSeniorityName] = useState('');
+  const [newSeniorityColor, setNewSeniorityColor] = useState('gray');
+  const [deleteConfirmSeniority, setDeleteConfirmSeniority] = useState<string | null>(null);
 
   const AVAILABLE_COLORS = ['indigo','amber','green','blue','purple','rose','teal','orange','cyan','pink','gray'];
   const COLOR_SWATCHES: Record<string, string> = {
@@ -78,7 +88,16 @@ const Settings: React.FC = () => {
     }
   };
 
-  useEffect(() => { load(); loadSnapshots(); loadAllocTypes(); }, []);
+  const loadSeniorityConfigs = async () => {
+    setSeniorityLoading(true);
+    try {
+      setSeniorityConfigs(await getSeniorityConfigs());
+    } finally {
+      setSeniorityLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); loadSnapshots(); loadAllocTypes(); loadSeniorityConfigs(); }, []);
 
   const toggleDim = (id: string) => {
     setExpandedDims((prev) => {
@@ -190,6 +209,29 @@ const Settings: React.FC = () => {
       loadAllocTypes();
     } catch {
       setError('Failed to delete allocation type.');
+    }
+  };
+
+  // Seniority config handlers
+  const handleAddSeniority = async () => {
+    if (!newSeniorityName.trim()) return;
+    try {
+      await createSeniorityConfig({ name: newSeniorityName.trim(), color: newSeniorityColor });
+      setNewSeniorityName('');
+      setNewSeniorityColor('gray');
+      loadSeniorityConfigs();
+    } catch (e: any) {
+      setError(e?.response?.data?.error ?? 'Failed to create seniority.');
+    }
+  };
+
+  const handleDeleteSeniority = async (id: string) => {
+    try {
+      await deleteSeniorityConfig(id);
+      setDeleteConfirmSeniority(null);
+      loadSeniorityConfigs();
+    } catch {
+      setError('Failed to delete seniority.');
     }
   };
 
@@ -504,6 +546,75 @@ const Settings: React.FC = () => {
                     onClick={() => setDeleteConfirmType(t.id)}
                     className="p-1.5 text-gray-400 hover:text-red-500 rounded"
                     title="Delete type"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Seniority Types */}
+      <section className="mt-10">
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">Seniority Levels</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Define the seniority levels available when adding or editing team members. Removing a level that is already assigned will display those members with a <span className="font-medium text-gray-700">gray</span> badge.
+        </p>
+
+        {/* Add new seniority */}
+        <div className="flex items-center gap-2 mb-5">
+          <input
+            type="text"
+            placeholder="New seniority level…"
+            value={newSeniorityName}
+            onChange={(e) => setNewSeniorityName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddSeniority(); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 w-48"
+          />
+          <div className="flex items-center gap-1">
+            {AVAILABLE_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setNewSeniorityColor(c)}
+                className={`w-5 h-5 rounded-full ${COLOR_SWATCHES[c]} ${newSeniorityColor === c ? 'ring-2 ring-offset-1 ring-gray-600' : ''}`}
+                title={c}
+              />
+            ))}
+          </div>
+          <button
+            onClick={handleAddSeniority}
+            disabled={!newSeniorityName.trim()}
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-lg disabled:opacity-50"
+          >
+            <Plus size={14} /> Add
+          </button>
+        </div>
+
+        {seniorityLoading ? (
+          <div className="text-sm text-gray-400">Loading…</div>
+        ) : seniorityConfigs.length === 0 ? (
+          <div className="text-sm text-gray-400">No seniority levels configured.</div>
+        ) : (
+          <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+            {seniorityConfigs.map((s) => (
+              <div key={s.id} className="flex items-center justify-between px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <span className={`w-3 h-3 rounded-full flex-shrink-0 ${COLOR_SWATCHES[s.color] ?? 'bg-gray-400'}`} />
+                  <span className="text-sm text-gray-800">{s.name}</span>
+                </div>
+                {deleteConfirmSeniority === s.id ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500">Delete?</span>
+                    <button onClick={() => handleDeleteSeniority(s.id)} className="text-red-600 text-sm flex items-center gap-1"><Check size={13} /> Yes</button>
+                    <button onClick={() => setDeleteConfirmSeniority(null)} className="text-gray-400 text-sm"><X size={13} /></button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteConfirmSeniority(s.id)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 rounded"
+                    title="Delete seniority level"
                   >
                     <Trash2 size={14} />
                   </button>
