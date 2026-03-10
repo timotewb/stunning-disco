@@ -154,9 +154,17 @@ const Matrices: React.FC = () => {
         id: 'name',
         header: 'Member',
         accessorFn: (m) => m.name,
-        cell: (info) => (
-          <span className="font-medium text-gray-800 whitespace-nowrap">{info.getValue() as string}</span>
-        ),
+        cell: (info) => {
+          const member = info.row.original;
+          return (
+            <span className={`font-medium whitespace-nowrap flex items-center gap-1.5 ${member.isLeaving ? 'text-amber-700' : 'text-gray-800'}`}>
+              {member.name}
+              {member.isLeaving && (
+                <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-medium">Leaving</span>
+              )}
+            </span>
+          );
+        },
         size: 160,
       },
       ...leafNodes.map((node) => ({
@@ -281,7 +289,7 @@ const Matrices: React.FC = () => {
               </thead>
               <tbody>
                 {table.getRowModel().rows.map((row) => (
-                  <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <tr key={row.id} className={`border-b ${row.original.isLeaving ? 'bg-amber-50 hover:bg-amber-100 border-amber-100' : 'border-gray-100 hover:bg-gray-50'}`}>
                     {row.getVisibleCells().map((cell) => (
                       <td key={cell.id} className="px-3 py-2">
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}

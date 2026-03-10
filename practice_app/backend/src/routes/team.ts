@@ -17,9 +17,9 @@ router.get('/', async (_req: Request, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, role, seniority, tags = [], notes = '' } = req.body;
+    const { name, role, seniority, tags = [], notes = '', isLeaving = false } = req.body;
     const member = await prisma.teamMember.create({
-      data: { name, role, seniority, tags: JSON.stringify(tags), notes },
+      data: { name, role, seniority, tags: JSON.stringify(tags), notes, isLeaving },
     });
     res.status(201).json({ ...member, tags: JSON.parse(member.tags) });
   } catch (err) {
@@ -30,7 +30,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.put('/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const { name, role, seniority, tags, notes } = req.body;
+    const { name, role, seniority, tags, notes, isLeaving } = req.body;
     const member = await prisma.teamMember.update({
       where: { id },
       data: {
@@ -39,6 +39,7 @@ router.put('/:id', async (req: Request, res: Response) => {
         ...(seniority !== undefined && { seniority }),
         ...(tags !== undefined && { tags: JSON.stringify(tags) }),
         ...(notes !== undefined && { notes }),
+        ...(isLeaving !== undefined && { isLeaving }),
       },
     });
     res.json({ ...member, tags: JSON.parse(member.tags) });

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Download } from 'lucide-react';
+import { Download, AlertTriangle } from 'lucide-react';
 import type { Dimension, DimensionNode, TeamMember, SMEAssignment } from '../types';
 import { getDimensions, getTeam, getSME, upsertSME, getMatrix } from '../api/client';
 import { useSnapshot } from '../context/SnapshotContext';
@@ -392,6 +392,7 @@ const SMETab: React.FC<{
       </div>
     );
   }
+  const teamById = new Map(team.map((m) => [m.id, m]));
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <table className="w-full text-sm">
@@ -413,6 +414,13 @@ const SMETab: React.FC<{
             const assignment = smeAssignments.find(
               (s) => s.dimensionNodeId === row.node.id && s.snapshotId === snapshotId
             );
+            const primaryLeaving = assignment?.primaryMemberId
+              ? (teamById.get(assignment.primaryMemberId)?.isLeaving ?? false)
+              : false;
+            const backupLeaving = assignment?.backupMemberId
+              ? (teamById.get(assignment.backupMemberId)?.isLeaving ?? false)
+              : false;
+            const rowWarning = primaryLeaving || backupLeaving;
             return (
               <React.Fragment key={row.node.id}>
                 {row.isFirstInDimension && (
@@ -435,7 +443,7 @@ const SMETab: React.FC<{
                     </td>
                   </tr>
                 )}
-                <tr className="border-b border-gray-100 hover:bg-gray-50">
+                <tr className={`border-b ${rowWarning ? 'bg-amber-50 hover:bg-amber-100 border-amber-100' : 'border-gray-100 hover:bg-gray-50'}`}>
                   <td
                     className={`py-3 font-medium text-gray-800 ${
                       row.parentNodeName ? 'pl-12 pr-5' : 'px-5'
@@ -444,38 +452,44 @@ const SMETab: React.FC<{
                     {row.node.name}
                   </td>
                   <td className="px-5 py-3">
-                    <select
-                      value={assignment?.primaryMemberId ?? ''}
-                      onChange={(e) =>
-                        snapshotId && onSMEChange(row.node.id, 'primaryMemberId', e.target.value)
-                      }
-                      disabled={!snapshotId}
-                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 disabled:opacity-50"
-                    >
-                      <option value="">— None —</option>
-                      {team.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex items-center gap-1.5">
+                      {primaryLeaving && <AlertTriangle size={13} className="text-orange-500 flex-shrink-0" />}
+                      <select
+                        value={assignment?.primaryMemberId ?? ''}
+                        onChange={(e) =>
+                          snapshotId && onSMEChange(row.node.id, 'primaryMemberId', e.target.value)
+                        }
+                        disabled={!snapshotId}
+                        className={`border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 disabled:opacity-50 ${primaryLeaving ? 'border-orange-300 bg-orange-50' : 'border-gray-200'}`}
+                      >
+                        <option value="">— None —</option>
+                        {team.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}{m.isLeaving ? ' (leaving)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </td>
                   <td className="px-5 py-3">
-                    <select
-                      value={assignment?.backupMemberId ?? ''}
-                      onChange={(e) =>
-                        snapshotId && onSMEChange(row.node.id, 'backupMemberId', e.target.value)
-                      }
-                      disabled={!snapshotId}
-                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 disabled:opacity-50"
-                    >
-                      <option value="">— None —</option>
-                      {team.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex items-center gap-1.5">
+                      {backupLeaving && <AlertTriangle size={13} className="text-orange-500 flex-shrink-0" />}
+                      <select
+                        value={assignment?.backupMemberId ?? ''}
+                        onChange={(e) =>
+                          snapshotId && onSMEChange(row.node.id, 'backupMemberId', e.target.value)
+                        }
+                        disabled={!snapshotId}
+                        className={`border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 disabled:opacity-50 ${backupLeaving ? 'border-orange-300 bg-orange-50' : 'border-gray-200'}`}
+                      >
+                        <option value="">— None —</option>
+                        {team.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}{m.isLeaving ? ' (leaving)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </td>
                 </tr>
               </React.Fragment>

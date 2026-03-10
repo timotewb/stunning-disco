@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Briefcase, Star } from 'lucide-react';
+import { Users, Briefcase, Star, AlertTriangle } from 'lucide-react';
 import type { TeamMember, Allocation, SMEAssignment, MatrixEntry, Dimension, DimensionNode, AllocationTypeConfig } from '../types';
 import { getTeam, getAllocations, getSME, getMatrix, getDimensions, getAllocationTypes } from '../api/client';
 
@@ -124,6 +124,9 @@ const Dashboard: React.FC = () => {
   // Coverage: average skill per leaf node, grouped by dimension and parent
   const coverageItems = buildCoverageItems(dimensions, entries);
 
+  const leavingMembers = team.filter((m) => m.isLeaving);
+  const memberById = new Map(team.map((m) => [m.id, m]));
+
   const typeColorMap: Record<string, string> = { uncategorised: 'bg-gray-400' };
   for (const t of allocationTypes) {
     typeColorMap[t.name] = PRESET_COLORS[t.color] ?? 'bg-gray-400';
@@ -142,11 +145,29 @@ const Dashboard: React.FC = () => {
       <h2 className="text-2xl font-bold text-gray-900">Dashboard</h2>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-4 gap-6">
         <StatCard icon={<Users size={22} />} label="Team Size" value={team.length} />
         <StatCard icon={<Briefcase size={22} />} label="Active Projects" value={activeProjects} />
         <StatCard icon={<Star size={22} />} label="SME Assignments" value={sme.length} />
+        <StatCard
+          icon={<AlertTriangle size={22} />}
+          label="Leaving"
+          value={leavingMembers.length}
+          warning={leavingMembers.length > 0}
+        />
       </div>
+
+      {leavingMembers.length > 0 && (
+        <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+          <AlertTriangle size={18} className="text-orange-500 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Potential coverage gaps</p>
+            <p className="text-sm text-amber-700 mt-0.5">
+              {leavingMembers.map((m) => m.name).join(', ')} {leavingMembers.length === 1 ? 'is' : 'are'} marked as leaving. Review the Matrices and Capabilities pages to identify gaps.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Current week allocations */}
       <section>
@@ -157,19 +178,24 @@ const Dashboard: React.FC = () => {
           <p className="text-gray-400 text-sm">No allocations this week.</p>
         ) : (
           <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-            {currentWeekAllocs.map((a) => (
-              <div key={a.id} className="px-5 py-3 flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-gray-800">{a.teamMember?.name}</span>
-                  <span className="text-gray-500 ml-2 text-sm">{a.projectName}</span>
-                </div>
+            {currentWeekAllocs.map((a) => {
+              const member = memberById.get(a.teamMemberId);
+              const isLeaving = member?.isLeaving ?? false;
+              return (
+                <div key={a.id} className={`px-5 py-3 flex items-center justify-between ${isLeaving ? 'bg-amber-50' : ''}`}>
+                  <div className="flex items-center gap-2">
+                    {isLeaving && <AlertTriangle size={13} className="text-orange-500 flex-shrink-0" />}
+                    <span className={`font-medium ${isLeaving ? 'text-amber-800' : 'text-gray-800'}`}>{a.teamMember?.name ?? member?.name}</span>
+                    <span className="text-gray-500 text-sm">{a.projectName}</span>
+                  </div>
                   <span
                     className={`text-xs text-white px-2 py-0.5 rounded-full ${typeColorMap[a.type] ?? typeColorMap.uncategorised}`}
                   >
                     {typeColorMap[a.type] ? a.type : 'uncategorised'}
                   </span>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
@@ -218,16 +244,17 @@ const Dashboard: React.FC = () => {
   );
 };
 
-const StatCard: React.FC<{ icon: React.ReactNode; label: string; value: number }> = ({
+const StatCard: React.FC<{ icon: React.ReactNode; label: string; value: number; warning?: boolean }> = ({
   icon,
   label,
   value,
+  warning,
 }) => (
-  <div className="bg-white rounded-xl border border-gray-200 p-6 flex items-center gap-4">
-    <div className="p-3 bg-indigo-50 rounded-lg text-indigo-600">{icon}</div>
+  <div className={`rounded-xl border p-6 flex items-center gap-4 ${warning && value > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
+    <div className={`p-3 rounded-lg ${warning && value > 0 ? 'bg-orange-100 text-orange-600' : 'bg-indigo-50 text-indigo-600'}`}>{icon}</div>
     <div>
-      <p className="text-sm text-gray-500">{label}</p>
-      <p className="text-3xl font-bold text-gray-900">{value}</p>
+      <p className={`text-sm ${warning && value > 0 ? 'text-amber-700' : 'text-gray-500'}`}>{label}</p>
+      <p className={`text-3xl font-bold ${warning && value > 0 ? 'text-amber-800' : 'text-gray-900'}`}>{value}</p>
     </div>
   </div>
 );

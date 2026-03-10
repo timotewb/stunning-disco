@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Plus, Pencil, Trash2, X, Check, Download } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, Download, AlertTriangle } from 'lucide-react';
 import type { Allocation, TeamMember, AllocationTypeConfig } from '../types';
 import { getAllocations, getTeam, createAllocation, updateAllocation, deleteAllocation, getAllocationTypes } from '../api/client';
 
@@ -240,9 +240,10 @@ const Timeline: React.FC = () => {
               return team.map((member) => {
                 const memberAllocs = visibleAllocations.filter((a) => a.teamMemberId === member.id);
                 return (
-                  <div key={member.id} className="flex border-b border-gray-100 hover:bg-gray-50 min-h-[48px]">
-                    <div className="w-40 flex-shrink-0 px-4 flex items-center text-sm font-medium text-gray-800 border-r border-gray-100">
-                      {member.name}
+                  <div key={member.id} className={`flex border-b min-h-[48px] ${member.isLeaving ? 'bg-amber-50 hover:bg-amber-100 border-amber-100' : 'border-gray-100 hover:bg-gray-50'}`}>
+                    <div className={`w-40 flex-shrink-0 px-4 flex items-center gap-1.5 text-sm font-medium border-r ${member.isLeaving ? 'text-amber-700 border-amber-200' : 'text-gray-800 border-gray-100'}`}>
+                      {member.isLeaving && <AlertTriangle size={12} className="text-orange-500 flex-shrink-0" />}
+                      <span className="truncate">{member.name}</span>
                     </div>
                     <div className="flex-1 relative py-2">
                       {memberAllocs.map((a) => {

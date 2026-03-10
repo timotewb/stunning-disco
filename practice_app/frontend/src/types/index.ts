@@ -5,6 +5,7 @@ export interface TeamMember {
   seniority: string;
   tags: string[];
   notes: string;
+  isLeaving: boolean;
   createdAt: string;
 }
 

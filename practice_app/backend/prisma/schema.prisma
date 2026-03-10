@@ -18,6 +18,7 @@ model TeamMember {
   seniority     String
   tags          String          @default("[]")
   notes         String          @default("")
+  isLeaving     Boolean         @default(false)
   createdAt     DateTime        @default(now())
   matrixEntries MatrixEntry[]
   allocations   Allocation[]

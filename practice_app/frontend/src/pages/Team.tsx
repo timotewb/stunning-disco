@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, AlertTriangle } from 'lucide-react';
 import type { TeamMember, SeniorityConfig } from '../types';
 import { getTeam, createMember, updateMember, deleteMember, getSeniorityConfigs } from '../api/client';
 
@@ -17,7 +17,7 @@ const PRESET_BADGE_COLORS: Record<string, string> = {
   gray:   'bg-gray-100 text-gray-600',
 };
 
-const emptyForm = { name: '', role: '', seniority: '', tags: [] as string[], notes: '' };
+const emptyForm = { name: '', role: '', seniority: '', tags: [] as string[], notes: '', isLeaving: false };
 
 const Team: React.FC = () => {
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -86,7 +86,7 @@ const Team: React.FC = () => {
   };
 
   const openEdit = (m: TeamMember) => {
-    setForm({ name: m.name, role: m.role, seniority: m.seniority, tags: [...m.tags], notes: m.notes });
+    setForm({ name: m.name, role: m.role, seniority: m.seniority, tags: [...m.tags], notes: m.notes, isLeaving: m.isLeaving });
     setTagInput('');
     setRoleSuggestions([]);
     setEditingId(m.id);
@@ -161,15 +161,20 @@ const Team: React.FC = () => {
             <div className="px-6 py-8 text-center text-gray-400 text-sm">No team members found.</div>
           ) : (
             filtered.map((m) => (
-              <div key={m.id} className="px-5 py-4 flex items-center justify-between">
+              <div key={m.id} className={`px-5 py-4 flex items-center justify-between ${m.isLeaving ? 'bg-amber-50 border-l-4 border-amber-400' : ''}`}>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3">
-                    <span className="font-semibold text-gray-900">{m.name}</span>
+                    <span className={`font-semibold ${m.isLeaving ? 'text-amber-800' : 'text-gray-900'}`}>{m.name}</span>
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full font-medium ${seniorityBadge(m.seniority)}`}
                     >
                       {m.seniority || '—'}
                     </span>
+                    {m.isLeaving && (
+                      <span className="flex items-center gap-1 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">
+                        <AlertTriangle size={10} /> Leaving
+                      </span>
+                    )}
                   </div>
                   <div className="text-sm text-gray-500 mt-0.5">{m.role}</div>
                   {m.tags.length > 0 && (
@@ -319,6 +324,23 @@ const Team: React.FC = () => {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 />
               </Field>
+              <div className="flex items-center justify-between p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <div>
+                  <p className="text-sm font-medium text-amber-800">Leaving the team</p>
+                  <p className="text-xs text-amber-600 mt-0.5">Highlights this member across all views to show coverage gaps</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, isLeaving: !f.isLeaving }))}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${form.isLeaving ? 'bg-orange-500' : 'bg-gray-200'}`}
+                  role="switch"
+                  aria-checked={form.isLeaving}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${form.isLeaving ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
+              </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button
