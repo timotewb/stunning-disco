@@ -107,3 +107,13 @@ export const saveNote = (date: string, content: string) =>
   api.put<Note>(`/notes/${date}`, { content }).then((r) => r.data);
 export const searchNotes = (q: string) =>
   api.get<NoteSearchResult[]>('/notes/search', { params: { q } }).then((r) => r.data);
+
+// Member notes
+export const getMemberNotes = (slug: string) =>
+  api.get<NoteListItem[]>(`/notes/members/${slug}`).then((r) => r.data);
+export const getMemberNote = (slug: string, date: string) =>
+  api.get<Note>(`/notes/members/${slug}/${date}`).then((r) => r.data);
+export const saveMemberNote = (slug: string, date: string, content: string) =>
+  api.put<Note>(`/notes/members/${slug}/${date}`, { content }).then((r) => r.data);
+export const searchMemberNotes = (slug: string, q: string) =>
+  api.get<NoteSearchResult[]>(`/notes/members/${slug}/search`, { params: { q } }).then((r) => r.data);
