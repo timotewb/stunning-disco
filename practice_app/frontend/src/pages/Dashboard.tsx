@@ -1,7 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { Users, Briefcase, Star } from 'lucide-react';
-import type { TeamMember, Allocation, SMEAssignment, MatrixEntry, Dimension } from '../types';
-import { getTeam, getAllocations, getSME, getMatrix, getDimensions } from '../api/client';
+import type { TeamMember, Allocation, SMEAssignment, MatrixEntry, Dimension, AllocationTypeConfig } from '../types';
+import { getTeam, getAllocations, getSME, getMatrix, getDimensions, getAllocationTypes } from '../api/client';
+
+const PRESET_COLORS: Record<string, string> = {
+  indigo: 'bg-indigo-500',
+  amber:  'bg-amber-400',
+  green:  'bg-green-500',
+  blue:   'bg-blue-500',
+  purple: 'bg-purple-500',
+  rose:   'bg-rose-500',
+  teal:   'bg-teal-500',
+  orange: 'bg-orange-500',
+  cyan:   'bg-cyan-500',
+  pink:   'bg-pink-500',
+  gray:   'bg-gray-400',
+};
 
 const Dashboard: React.FC = () => {
   const [team, setTeam] = useState<TeamMember[]>([]);
@@ -9,16 +23,18 @@ const Dashboard: React.FC = () => {
   const [sme, setSme] = useState<SMEAssignment[]>([]);
   const [entries, setEntries] = useState<MatrixEntry[]>([]);
   const [dimensions, setDimensions] = useState<Dimension[]>([]);
+  const [allocationTypes, setAllocationTypes] = useState<AllocationTypeConfig[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getTeam(), getAllocations(), getSME(), getMatrix({}), getDimensions()])
-      .then(([t, a, s, e, d]) => {
+    Promise.all([getTeam(), getAllocations(), getSME(), getMatrix({}), getDimensions(), getAllocationTypes()])
+      .then(([t, a, s, e, d, at]) => {
         setTeam(t);
         setAllocations(a);
         setSme(s);
         setEntries(e);
         setDimensions(d);
+        setAllocationTypes(at);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -58,12 +74,10 @@ const Dashboard: React.FC = () => {
     });
   }).flat();
 
-  const typeColors: Record<string, string> = {
-    project: 'bg-indigo-500',
-    leave: 'bg-amber-400',
-    internal: 'bg-green-500',
-    training: 'bg-blue-500',
-  };
+  const typeColorMap: Record<string, string> = { uncategorised: 'bg-gray-400' };
+  for (const t of allocationTypes) {
+    typeColorMap[t.name] = PRESET_COLORS[t.color] ?? 'bg-gray-400';
+  }
 
   if (loading) {
     return (
@@ -122,11 +136,11 @@ const Dashboard: React.FC = () => {
                   <span className="font-medium text-gray-800">{a.teamMember?.name}</span>
                   <span className="text-gray-500 ml-2 text-sm">{a.projectName}</span>
                 </div>
-                <span
-                  className={`text-xs text-white px-2 py-0.5 rounded-full ${typeColors[a.type] ?? 'bg-gray-400'}`}
-                >
-                  {a.type}
-                </span>
+                  <span
+                    className={`text-xs text-white px-2 py-0.5 rounded-full ${typeColorMap[a.type] ?? typeColorMap.uncategorised}`}
+                  >
+                    {typeColorMap[a.type] ? a.type : 'uncategorised'}
+                  </span>
               </div>
             ))}
           </div>

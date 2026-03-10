@@ -7,6 +7,7 @@ import dimensionNodesRouter from './routes/dimension-nodes';
 import snapshotsRouter from './routes/snapshots';
 import matrixRouter from './routes/matrix';
 import allocationsRouter from './routes/allocations';
+import allocationTypesRouter from './routes/allocationTypes';
 import smeRouter from './routes/sme';
 import exportRouter from './routes/export';
 
@@ -27,6 +28,7 @@ app.use('/api/snapshots', snapshotsRouter);
 app.use('/api/matrix', matrixRouter);
 app.use('/api/matrix-entry', matrixRouter);
 app.use('/api/allocations', allocationsRouter);
+app.use('/api/allocation-types', allocationTypesRouter);
 app.use('/api/sme', smeRouter);
 app.use('/api/export', exportRouter);
 

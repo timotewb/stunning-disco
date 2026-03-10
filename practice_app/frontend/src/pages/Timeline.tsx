@@ -1,16 +1,31 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Plus, Pencil, Trash2, X, Check, Download } from 'lucide-react';
-import type { Allocation, TeamMember } from '../types';
-import { getAllocations, getTeam, createAllocation, updateAllocation, deleteAllocation } from '../api/client';
+import type { Allocation, TeamMember, AllocationTypeConfig } from '../types';
+import { getAllocations, getTeam, createAllocation, updateAllocation, deleteAllocation, getAllocationTypes } from '../api/client';
 
-const TYPE_COLORS: Record<string, { bar: string; badge: string }> = {
-  project: { bar: 'bg-indigo-500', badge: 'bg-indigo-100 text-indigo-700' },
-  leave: { bar: 'bg-amber-400', badge: 'bg-amber-100 text-amber-700' },
-  internal: { bar: 'bg-green-500', badge: 'bg-green-100 text-green-700' },
-  training: { bar: 'bg-blue-500', badge: 'bg-blue-100 text-blue-700' },
+const PRESET_COLORS: Record<string, { bar: string; badge: string }> = {
+  indigo: { bar: 'bg-indigo-500', badge: 'bg-indigo-100 text-indigo-700' },
+  amber:  { bar: 'bg-amber-400',  badge: 'bg-amber-100 text-amber-700'  },
+  green:  { bar: 'bg-green-500',  badge: 'bg-green-100 text-green-700'  },
+  blue:   { bar: 'bg-blue-500',   badge: 'bg-blue-100 text-blue-700'    },
+  purple: { bar: 'bg-purple-500', badge: 'bg-purple-100 text-purple-700' },
+  rose:   { bar: 'bg-rose-500',   badge: 'bg-rose-100 text-rose-700'    },
+  teal:   { bar: 'bg-teal-500',   badge: 'bg-teal-100 text-teal-700'    },
+  orange: { bar: 'bg-orange-500', badge: 'bg-orange-100 text-orange-700' },
+  cyan:   { bar: 'bg-cyan-500',   badge: 'bg-cyan-100 text-cyan-700'    },
+  pink:   { bar: 'bg-pink-500',   badge: 'bg-pink-100 text-pink-700'    },
+  gray:   { bar: 'bg-gray-400',   badge: 'bg-gray-100 text-gray-600'    },
 };
 
-const TYPES = ['project', 'leave', 'internal', 'training'] as const;
+function typeColors(allocationTypes: AllocationTypeConfig[]): Record<string, { bar: string; badge: string }> {
+  const map: Record<string, { bar: string; badge: string }> = {
+    uncategorised: PRESET_COLORS.gray,
+  };
+  for (const t of allocationTypes) {
+    map[t.name] = PRESET_COLORS[t.color] ?? PRESET_COLORS.gray;
+  }
+  return map;
+}
 
 function getQuarterRange() {
   const now = new Date();
@@ -27,7 +42,7 @@ function toDateInput(d: Date) {
 const emptyForm = {
   teamMemberId: '',
   projectName: '',
-  type: 'project' as Allocation['type'],
+  type: 'project',
   startDate: '',
   endDate: '',
   notes: '',
@@ -36,6 +51,7 @@ const emptyForm = {
 const Timeline: React.FC = () => {
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [team, setTeam] = useState<TeamMember[]>([]);
+  const [allocationTypes, setAllocationTypes] = useState<AllocationTypeConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [rangeStart, setRangeStart] = useState(() => toDateInput(getQuarterRange().start));
   const [rangeEnd, setRangeEnd] = useState(() => toDateInput(getQuarterRange().end));
@@ -49,9 +65,10 @@ const Timeline: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [a, t] = await Promise.all([getAllocations(), getTeam()]);
+      const [a, t, at] = await Promise.all([getAllocations(), getTeam(), getAllocationTypes()]);
       setAllocations(a);
       setTeam(t);
+      setAllocationTypes(at);
     } finally {
       setLoading(false);
     }
@@ -84,7 +101,8 @@ const Timeline: React.FC = () => {
   };
 
   const openAdd = () => {
-    setForm({ ...emptyForm, teamMemberId: team[0]?.id ?? '', startDate: rangeStart, endDate: rangeEnd });
+    const defaultType = allocationTypes[0]?.name ?? 'project';
+    setForm({ ...emptyForm, teamMemberId: team[0]?.id ?? '', type: defaultType, startDate: rangeStart, endDate: rangeEnd });
     setEditingId(null);
     setShowModal(true);
   };
@@ -188,10 +206,10 @@ const Timeline: React.FC = () => {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-4 mb-4">
-        {TYPES.map((t) => (
-          <span key={t} className={`text-xs px-2 py-0.5 rounded-full font-medium ${TYPE_COLORS[t].badge}`}>
-            {t}
+      <div className="flex items-center gap-4 mb-4 flex-wrap">
+        {allocationTypes.map((t) => (
+          <span key={t.name} className={`text-xs px-2 py-0.5 rounded-full font-medium ${(PRESET_COLORS[t.color] ?? PRESET_COLORS.gray).badge}`}>
+            {t.name}
           </span>
         ))}
       </div>
@@ -217,35 +235,39 @@ const Timeline: React.FC = () => {
 
           {/* Rows */}
           <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
-            {team.map((member) => {
-              const memberAllocs = visibleAllocations.filter((a) => a.teamMemberId === member.id);
-              return (
-                <div key={member.id} className="flex border-b border-gray-100 hover:bg-gray-50 min-h-[48px]">
-                  <div className="w-40 flex-shrink-0 px-4 flex items-center text-sm font-medium text-gray-800 border-r border-gray-100">
-                    {member.name}
+            {(() => {
+              const colors = typeColors(allocationTypes);
+              return team.map((member) => {
+                const memberAllocs = visibleAllocations.filter((a) => a.teamMemberId === member.id);
+                return (
+                  <div key={member.id} className="flex border-b border-gray-100 hover:bg-gray-50 min-h-[48px]">
+                    <div className="w-40 flex-shrink-0 px-4 flex items-center text-sm font-medium text-gray-800 border-r border-gray-100">
+                      {member.name}
+                    </div>
+                    <div className="flex-1 relative py-2">
+                      {memberAllocs.map((a) => {
+                        const s = new Date(a.startDate);
+                        const e = new Date(a.endDate);
+                        const left = leftPct(s);
+                        const width = widthPct(s, e);
+                        const displayType = colors[a.type] ? a.type : 'uncategorised';
+                        return (
+                          <div
+                            key={a.id}
+                            className={`absolute top-1 bottom-1 rounded-md flex items-center px-2 text-xs text-white cursor-pointer ${colors[displayType].bar}`}
+                            style={{ left: `${left}%`, width: `${width}%` }}
+                            onClick={() => openEdit(a)}
+                            title={`${a.projectName} (${displayType})`}
+                          >
+                            <span className="truncate">{a.projectName}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="flex-1 relative py-2">
-                    {memberAllocs.map((a) => {
-                      const s = new Date(a.startDate);
-                      const e = new Date(a.endDate);
-                      const left = leftPct(s);
-                      const width = widthPct(s, e);
-                      return (
-                        <div
-                          key={a.id}
-                          className={`absolute top-1 bottom-1 rounded-md flex items-center px-2 text-xs text-white cursor-pointer ${TYPE_COLORS[a.type]?.bar ?? 'bg-gray-400'}`}
-                          style={{ left: `${left}%`, width: `${width}%` }}
-                          onClick={() => openEdit(a)}
-                          title={`${a.projectName} (${a.type})`}
-                        >
-                          <span className="truncate">{a.projectName}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         </div>
       )}
@@ -276,10 +298,10 @@ const Timeline: React.FC = () => {
               <Field label="Type">
                 <select
                   value={form.type}
-                  onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as Allocation['type'] }))}
+                  onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 >
-                  {TYPES.map((t) => <option key={t}>{t}</option>)}
+                  {allocationTypes.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
                 </select>
               </Field>
               <div className="grid grid-cols-2 gap-3">

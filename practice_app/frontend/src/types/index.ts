@@ -45,11 +45,18 @@ export interface Allocation {
   id: string;
   teamMemberId: string;
   projectName: string;
-  type: 'project' | 'leave' | 'internal' | 'training';
+  type: string;
   startDate: string;
   endDate: string;
   notes: string;
   teamMember?: TeamMember;
+}
+
+export interface AllocationTypeConfig {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: string;
 }
 
 export interface SMEAssignment {
@@ -64,4 +71,4 @@ export interface SMEAssignment {
   snapshot?: Snapshot;
 }
 
-export type AllocationType = 'project' | 'leave' | 'internal' | 'training';
+export type AllocationType = string;

@@ -1,4 +1,4 @@
-- add timeout screen. after 2mins of inactivity a lock screen appears. there is a single button "open" which when clicked returns the user to the app. this is to act like a privacy screen so that if the user happens to pass by the screen with others watching, they will not be able to see the app.
+
 - allocation types shoudl be configurable in settings. i.e. i can add or remove allocation types. if i remove a type which is being used a default allocation type of "uncategorised" appears.
 - Seniority types should be configurable in the settings.
 - when the user enters a role name this will be saved so when the user enters the same role for another team member it will show up as an autocomplete option which can be clicked on to select it.
@@ -7,3 +7,5 @@
 - Capabilities coverage and sme views need to include the dimensions hierarchy other wise it is difficult to understand what each capability relates to.
 - Add a boolean flag to each team member which indicates if they are leaving or not. this flag is to be used in all views and will highlight in a vivid colour the team members stats so it is easy to see where potential gaps could be when they leave (answering, will we have coverage if they leave)
 - what is the difference between skill, competency, knowledge???
+- daily notes and markdown editor, a tab where the user can enter notes in markdown format and optionally preview them in real time. these notes are saved to the same location as the sqlite database, in a directory notes/yyyymm/yyyy-mm-dd.md
+- data import and export in settings where all database 

@@ -77,6 +77,13 @@ model Allocation {
   teamMember   TeamMember @relation(fields: [teamMemberId], references: [id], onDelete: Cascade)
 }
 
+model AllocationTypeConfig {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String   @default("gray")
+  createdAt DateTime @default(now())
+}
+
 model SMEAssignment {
   id              String        @id @default(uuid())
   dimensionNodeId String

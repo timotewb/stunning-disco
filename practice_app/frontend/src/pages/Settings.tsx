@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown } from 'lucide-react';
-import type { Dimension, DimensionNode, Snapshot } from '../types';
+import type { Dimension, DimensionNode, Snapshot, AllocationTypeConfig } from '../types';
 import {
   getDimensions,
   createDimension,
@@ -12,6 +12,9 @@ import {
   getSnapshots,
   deleteSnapshot,
   deleteSnapshots,
+  getAllocationTypes,
+  createAllocationType,
+  deleteAllocationType,
 } from '../api/client';
 import { useSnapshot } from '../context/SnapshotContext';
 
@@ -34,6 +37,20 @@ const Settings: React.FC = () => {
   const [deletingSnaps, setDeletingSnaps] = useState(false);
   const [confirmDeleteSnaps, setConfirmDeleteSnaps] = useState<string[] | null>(null);
 
+  // Allocation type state
+  const [allocTypes, setAllocTypes] = useState<AllocationTypeConfig[]>([]);
+  const [allocTypesLoading, setAllocTypesLoading] = useState(true);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [newTypeColor, setNewTypeColor] = useState('gray');
+  const [deleteConfirmType, setDeleteConfirmType] = useState<string | null>(null);
+
+  const AVAILABLE_COLORS = ['indigo','amber','green','blue','purple','rose','teal','orange','cyan','pink','gray'];
+  const COLOR_SWATCHES: Record<string, string> = {
+    indigo: 'bg-indigo-500', amber: 'bg-amber-400', green: 'bg-green-500', blue: 'bg-blue-500',
+    purple: 'bg-purple-500', rose: 'bg-rose-500', teal: 'bg-teal-500', orange: 'bg-orange-500',
+    cyan: 'bg-cyan-500', pink: 'bg-pink-500', gray: 'bg-gray-400',
+  };
+
   const load = async () => {
     setLoading(true);
     try {
@@ -52,7 +69,16 @@ const Settings: React.FC = () => {
     }
   };
 
-  useEffect(() => { load(); loadSnapshots(); }, []);
+  const loadAllocTypes = async () => {
+    setAllocTypesLoading(true);
+    try {
+      setAllocTypes(await getAllocationTypes());
+    } finally {
+      setAllocTypesLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); loadSnapshots(); loadAllocTypes(); }, []);
 
   const toggleDim = (id: string) => {
     setExpandedDims((prev) => {
@@ -141,6 +167,29 @@ const Settings: React.FC = () => {
     } finally {
       setDeletingSnaps(false);
       setConfirmDeleteSnaps(null);
+    }
+  };
+
+  // Allocation type handlers
+  const handleAddAllocType = async () => {
+    if (!newTypeName.trim()) return;
+    try {
+      await createAllocationType({ name: newTypeName.trim().toLowerCase(), color: newTypeColor });
+      setNewTypeName('');
+      setNewTypeColor('gray');
+      loadAllocTypes();
+    } catch (e: any) {
+      setError(e?.response?.data?.error ?? 'Failed to create allocation type.');
+    }
+  };
+
+  const handleDeleteAllocType = async (id: string) => {
+    try {
+      await deleteAllocationType(id);
+      setDeleteConfirmType(null);
+      loadAllocTypes();
+    } catch {
+      setError('Failed to delete allocation type.');
     }
   };
 
@@ -392,6 +441,75 @@ const Settings: React.FC = () => {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+      </section>
+
+      {/* Allocation Types */}
+      <section className="mt-10">
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">Allocation Types</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Define the types available when creating allocations on the Timeline. Removing a type that is already in use will display those allocations as <span className="font-medium text-gray-700">uncategorised</span>.
+        </p>
+
+        {/* Add new type */}
+        <div className="flex items-center gap-2 mb-5">
+          <input
+            type="text"
+            placeholder="New type name…"
+            value={newTypeName}
+            onChange={(e) => setNewTypeName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddAllocType(); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 w-48"
+          />
+          <div className="flex items-center gap-1">
+            {AVAILABLE_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setNewTypeColor(c)}
+                className={`w-5 h-5 rounded-full ${COLOR_SWATCHES[c]} ${newTypeColor === c ? 'ring-2 ring-offset-1 ring-gray-600' : ''}`}
+                title={c}
+              />
+            ))}
+          </div>
+          <button
+            onClick={handleAddAllocType}
+            disabled={!newTypeName.trim()}
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-lg disabled:opacity-50"
+          >
+            <Plus size={14} /> Add
+          </button>
+        </div>
+
+        {allocTypesLoading ? (
+          <div className="text-sm text-gray-400">Loading…</div>
+        ) : allocTypes.length === 0 ? (
+          <div className="text-sm text-gray-400">No allocation types configured.</div>
+        ) : (
+          <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+            {allocTypes.map((t) => (
+              <div key={t.id} className="flex items-center justify-between px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <span className={`w-3 h-3 rounded-full flex-shrink-0 ${COLOR_SWATCHES[t.color] ?? 'bg-gray-400'}`} />
+                  <span className="text-sm text-gray-800">{t.name}</span>
+                </div>
+                {deleteConfirmType === t.id ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500">Delete?</span>
+                    <button onClick={() => handleDeleteAllocType(t.id)} className="text-red-600 text-sm flex items-center gap-1"><Check size={13} /> Yes</button>
+                    <button onClick={() => setDeleteConfirmType(null)} className="text-gray-400 text-sm"><X size={13} /></button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteConfirmType(t.id)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 rounded"
+                    title="Delete type"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </section>

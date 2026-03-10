@@ -6,6 +6,7 @@ import type {
   Snapshot,
   MatrixEntry,
   Allocation,
+  AllocationTypeConfig,
   SMEAssignment,
 } from '../types';
 
@@ -65,6 +66,13 @@ export const createAllocation = (data: Omit<Allocation, 'id' | 'teamMember'>) =>
 export const updateAllocation = (id: string, data: Partial<Allocation>) =>
   api.put<Allocation>(`/allocations/${id}`, data).then((r) => r.data);
 export const deleteAllocation = (id: string) => api.delete(`/allocations/${id}`);
+
+// Allocation Types
+export const getAllocationTypes = () =>
+  api.get<AllocationTypeConfig[]>('/allocation-types').then((r) => r.data);
+export const createAllocationType = (data: { name: string; color: string }) =>
+  api.post<AllocationTypeConfig>('/allocation-types', data).then((r) => r.data);
+export const deleteAllocationType = (id: string) => api.delete(`/allocation-types/${id}`);
 
 // SME
 export const getSME = () => api.get<SMEAssignment[]>('/sme').then((r) => r.data);
