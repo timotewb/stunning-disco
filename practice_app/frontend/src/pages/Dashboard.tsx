@@ -1,7 +1,67 @@
 import React, { useEffect, useState } from 'react';
 import { Users, Briefcase, Star } from 'lucide-react';
-import type { TeamMember, Allocation, SMEAssignment, MatrixEntry, Dimension, AllocationTypeConfig } from '../types';
+import type { TeamMember, Allocation, SMEAssignment, MatrixEntry, Dimension, DimensionNode, AllocationTypeConfig } from '../types';
 import { getTeam, getAllocations, getSME, getMatrix, getDimensions, getAllocationTypes } from '../api/client';
+
+type CoverageItem =
+  | { type: 'dimension-header'; name: string }
+  | { type: 'group-header'; name: string }
+  | { type: 'bar'; name: string; avg: number; indented: boolean };
+
+function getLeafDescendants(nodes: DimensionNode[], nodeId: string): DimensionNode[] {
+  const children = nodes
+    .filter((n) => n.parentId === nodeId)
+    .sort((a, b) => a.orderIndex - b.orderIndex);
+  if (children.length === 0) {
+    const node = nodes.find((n) => n.id === nodeId);
+    return node ? [node] : [];
+  }
+  return children.flatMap((c) => getLeafDescendants(nodes, c.id));
+}
+
+function buildCoverageItems(
+  dimensions: Dimension[],
+  entries: MatrixEntry[]
+): CoverageItem[] {
+  const avgFor = (nodeId: string) => {
+    const ne = entries.filter((e) => e.dimensionNodeId === nodeId);
+    return ne.length > 0 ? ne.reduce((s, e) => s + e.value, 0) / ne.length : 0;
+  };
+
+  const items: CoverageItem[] = [];
+
+  for (const dim of dimensions) {
+    const nodes = dim.nodes;
+    const rootNodes = nodes
+      .filter((n) => !n.parentId)
+      .sort((a, b) => a.orderIndex - b.orderIndex);
+    if (rootNodes.length === 0) continue;
+
+    items.push({ type: 'dimension-header', name: dim.name });
+
+    const hasAnyChildren = rootNodes.some((r) => nodes.some((n) => n.parentId === r.id));
+
+    if (!hasAnyChildren) {
+      for (const node of rootNodes) {
+        items.push({ type: 'bar', name: node.name, avg: avgFor(node.id), indented: false });
+      }
+    } else {
+      for (const root of rootNodes) {
+        const children = nodes.filter((n) => n.parentId === root.id);
+        if (children.length === 0) {
+          items.push({ type: 'bar', name: root.name, avg: avgFor(root.id), indented: false });
+        } else {
+          items.push({ type: 'group-header', name: root.name });
+          for (const leaf of getLeafDescendants(nodes, root.id)) {
+            items.push({ type: 'bar', name: leaf.name, avg: avgFor(leaf.id), indented: true });
+          }
+        }
+      }
+    }
+  }
+
+  return items;
+}
 
 const PRESET_COLORS: Record<string, string> = {
   indigo: 'bg-indigo-500',
@@ -61,18 +121,8 @@ const Dashboard: React.FC = () => {
     return s <= weekEnd && e >= weekStart;
   });
 
-  // Coverage: average skill per top-level node across latest snapshot entries
-  const coverageData = dimensions.map((dim) => {
-    const topNodes = dim.nodes.filter((n) => !n.parentId);
-    return topNodes.map((node) => {
-      const nodeEntries = entries.filter((e) => e.dimensionNodeId === node.id);
-      const avg =
-        nodeEntries.length > 0
-          ? nodeEntries.reduce((sum, e) => sum + e.value, 0) / nodeEntries.length
-          : 0;
-      return { name: node.name, avg, max: 4 };
-    });
-  }).flat();
+  // Coverage: average skill per leaf node, grouped by dimension and parent
+  const coverageItems = buildCoverageItems(dimensions, entries);
 
   const typeColorMap: Record<string, string> = { uncategorised: 'bg-gray-400' };
   for (const t of allocationTypes) {
@@ -125,24 +175,42 @@ const Dashboard: React.FC = () => {
       </section>
 
       {/* Capability Coverage */}
-      {coverageData.length > 0 && (
+      {coverageItems.length > 0 && (
         <section>
           <h3 className="text-lg font-semibold mb-4 text-gray-800">Capability Coverage</h3>
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-            {coverageData.map(({ name, avg, max }) => (
-              <div key={name}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-gray-700">{name}</span>
-                  <span className="text-gray-500">{avg.toFixed(1)} / {max}</span>
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
+            {coverageItems.map((item, i) => {
+              if (item.type === 'dimension-header') {
+                return (
+                  <div key={`dh-${i}`} className="pt-2 first:pt-0">
+                    <span className="text-xs font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2 py-1 rounded">
+                      {item.name}
+                    </span>
+                  </div>
+                );
+              }
+              if (item.type === 'group-header') {
+                return (
+                  <div key={`gh-${i}`} className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-2 mb-1">
+                    {item.name}
+                  </div>
+                );
+              }
+              return (
+                <div key={`bar-${i}`} className={item.indented ? 'pl-4' : ''}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-gray-700">{item.name}</span>
+                    <span className="text-gray-500">{item.avg.toFixed(1)} / 4</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500 rounded-full transition-all"
+                      style={{ width: `${(item.avg / 4) * 100}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-indigo-500 rounded-full transition-all"
-                    style={{ width: `${(avg / max) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
