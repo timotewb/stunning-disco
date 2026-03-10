@@ -24,7 +24,7 @@ const Sidebar: React.FC = () => {
   return (
     <aside className="w-56 bg-white border-r border-gray-200 flex flex-col py-6 flex-shrink-0">
       <div className="px-5 mb-8">
-        <h1 className="text-lg font-bold text-indigo-600 tracking-tight">Practice Viz</h1>
+        <h1 className="text-lg font-bold text-indigo-600 tracking-tight">kaimahi</h1>
       </div>
       <nav className="flex-1 space-y-1 px-3">
         {navItems.map(({ to, icon: Icon, label }) => (

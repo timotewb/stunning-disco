@@ -1,4 +1,4 @@
-# Practice Visualiser
+# kaimahi
 
 A local-first interactive web app for a practice lead to manage ~20 team members. Features skills matrices, project allocation timeline, SME tracking, capability coverage, and historical playback.
 
