@@ -80,3 +80,17 @@ export interface SMEAssignment {
 }
 
 export type AllocationType = string;
+
+export interface NoteListItem {
+  date: string;
+}
+
+export interface Note {
+  date: string;
+  content: string;
+}
+
+export interface NoteSearchResult {
+  date: string;
+  snippet: string;
+}

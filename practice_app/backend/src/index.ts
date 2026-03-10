@@ -10,6 +10,7 @@ import allocationsRouter from './routes/allocations';
 import allocationTypesRouter from './routes/allocationTypes';
 import seniorityConfigRouter from './routes/seniorityConfig';
 import smeRouter from './routes/sme';
+import notesRouter from './routes/notes';
 import exportRouter from './routes/export';
 
 if (!process.env.DATABASE_URL) {
@@ -32,6 +33,7 @@ app.use('/api/allocations', allocationsRouter);
 app.use('/api/allocation-types', allocationTypesRouter);
 app.use('/api/seniority-config', seniorityConfigRouter);
 app.use('/api/sme', smeRouter);
+app.use('/api/notes', notesRouter);
 app.use('/api/export', exportRouter);
 
 if (process.env.NODE_ENV === 'production') {

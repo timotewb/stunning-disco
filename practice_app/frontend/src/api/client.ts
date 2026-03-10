@@ -9,6 +9,9 @@ import type {
   AllocationTypeConfig,
   SeniorityConfig,
   SMEAssignment,
+  NoteListItem,
+  Note,
+  NoteSearchResult,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -96,3 +99,11 @@ export const deleteSME = (id: string) => api.delete(`/sme/${id}`);
 export const exportMatrix = () => api.get('/export/matrix').then((r) => r.data);
 export const exportTimeline = () => api.get('/export/timeline').then((r) => r.data);
 export const exportCapabilities = () => api.get('/export/capabilities').then((r) => r.data);
+
+// Notes
+export const getNotes = () => api.get<NoteListItem[]>('/notes').then((r) => r.data);
+export const getNote = (date: string) => api.get<Note>(`/notes/${date}`).then((r) => r.data);
+export const saveNote = (date: string, content: string) =>
+  api.put<Note>(`/notes/${date}`, { content }).then((r) => r.data);
+export const searchNotes = (q: string) =>
+  api.get<NoteSearchResult[]>('/notes/search', { params: { q } }).then((r) => r.data);

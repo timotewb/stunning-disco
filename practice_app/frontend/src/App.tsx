@@ -7,6 +7,7 @@ import Matrices from './pages/Matrices';
 import Timeline from './pages/Timeline';
 import Capabilities from './pages/Capabilities';
 import Settings from './pages/Settings';
+import Notes from './pages/Notes';
 import { SnapshotProvider } from './context/SnapshotContext';
 import { IdleProvider } from './context/IdleContext';
 import LockScreen from './components/LockScreen';
@@ -23,6 +24,7 @@ const App: React.FC = () => {
               <Route path="matrices" element={<Matrices />} />
               <Route path="timeline" element={<Timeline />} />
               <Route path="capabilities" element={<Capabilities />} />
+              <Route path="notes" element={<Notes />} />
               <Route path="settings" element={<Settings />} />
             </Route>
           </Routes>

@@ -6,6 +6,7 @@ import {
   Grid3X3,
   CalendarRange,
   BarChart3,
+  NotebookPen,
   Settings,
 } from 'lucide-react';
 
@@ -15,6 +16,7 @@ const navItems = [
   { to: '/matrices', icon: Grid3X3, label: 'Matrices' },
   { to: '/timeline', icon: CalendarRange, label: 'Timeline' },
   { to: '/capabilities', icon: BarChart3, label: 'Capabilities' },
+  { to: '/notes', icon: NotebookPen, label: 'Notes' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
