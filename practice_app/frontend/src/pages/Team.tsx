@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
 import type { TeamMember, SeniorityConfig } from '../types';
 import { getTeam, createMember, updateMember, deleteMember, getSeniorityConfigs } from '../api/client';
@@ -30,6 +30,8 @@ const Team: React.FC = () => {
   const [tagInput, setTagInput] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [roleSuggestions, setRoleSuggestions] = useState<string[]>([]);
+  const roleInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -51,6 +53,24 @@ const Team: React.FC = () => {
     return cfg ? (PRESET_BADGE_COLORS[cfg.color] ?? PRESET_BADGE_COLORS.gray) : PRESET_BADGE_COLORS.gray;
   };
 
+  const knownRoles = Array.from(new Set(members.map((m) => m.role).filter(Boolean))).sort();
+
+  const handleRoleChange = (value: string) => {
+    setForm((f) => ({ ...f, role: value }));
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed) {
+      setRoleSuggestions(knownRoles.filter((r) => r.toLowerCase().includes(trimmed) && r.toLowerCase() !== trimmed));
+    } else {
+      setRoleSuggestions([]);
+    }
+  };
+
+  const selectRole = (role: string) => {
+    setForm((f) => ({ ...f, role }));
+    setRoleSuggestions([]);
+    roleInputRef.current?.focus();
+  };
+
   const filtered = members.filter(
     (m) =>
       m.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -60,6 +80,7 @@ const Team: React.FC = () => {
   const openAdd = () => {
     setForm({ ...emptyForm, seniority: seniorityConfigs[0]?.name ?? '' });
     setTagInput('');
+    setRoleSuggestions([]);
     setEditingId(null);
     setShowModal(true);
   };
@@ -67,6 +88,7 @@ const Team: React.FC = () => {
   const openEdit = (m: TeamMember) => {
     setForm({ name: m.name, role: m.role, seniority: m.seniority, tags: [...m.tags], notes: m.notes });
     setTagInput('');
+    setRoleSuggestions([]);
     setEditingId(m.id);
     setShowModal(true);
   };
@@ -212,12 +234,35 @@ const Team: React.FC = () => {
                 />
               </Field>
               <Field label="Role">
-                <input
-                  type="text"
-                  value={form.role}
-                  onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                />
+                <div className="relative">
+                  <input
+                    ref={roleInputRef}
+                    type="text"
+                    value={form.role}
+                    onChange={(e) => handleRoleChange(e.target.value)}
+                    onBlur={() => setTimeout(() => setRoleSuggestions([]), 150)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setRoleSuggestions([]);
+                    }}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    autoComplete="off"
+                  />
+                  {roleSuggestions.length > 0 && (
+                    <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                      {roleSuggestions.map((r) => (
+                        <li key={r}>
+                          <button
+                            type="button"
+                            onMouseDown={() => selectRole(r)}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 hover:text-indigo-700"
+                          >
+                            {r}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </Field>
               <Field label="Seniority">
                 <select
