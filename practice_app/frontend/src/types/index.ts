@@ -94,3 +94,20 @@ export interface NoteSearchResult {
   date: string;
   snippet: string;
 }
+
+export interface FolderNote {
+  slug: string;
+  name: string;
+}
+
+export interface Folder {
+  slug: string;
+  name: string;
+  notes: FolderNote[];
+}
+
+export interface FolderNoteContent {
+  slug: string;
+  name: string;
+  content: string;
+}

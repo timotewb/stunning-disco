@@ -12,6 +12,9 @@ import type {
   NoteListItem,
   Note,
   NoteSearchResult,
+  Folder,
+  FolderNote,
+  FolderNoteContent,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -117,3 +120,28 @@ export const saveMemberNote = (slug: string, date: string, content: string) =>
   api.put<Note>(`/notes/members/${slug}/${date}`, { content }).then((r) => r.data);
 export const searchMemberNotes = (slug: string, q: string) =>
   api.get<NoteSearchResult[]>(`/notes/members/${slug}/search`, { params: { q } }).then((r) => r.data);
+
+// Folder notes
+export const getFolders = () =>
+  api.get<Folder[]>('/notes/folders').then((r) => r.data);
+export const createFolder = (name: string) =>
+  api.post<Folder>('/notes/folders', { name }).then((r) => r.data);
+export const renameFolder = (folderSlug: string, name: string) =>
+  api.patch<{ slug: string; name: string }>(`/notes/folders/${folderSlug}`, { name }).then((r) => r.data);
+export const deleteFolder = (folderSlug: string) =>
+  api.delete(`/notes/folders/${folderSlug}`);
+export const createFolderNote = (folderSlug: string, name: string) =>
+  api.post<FolderNoteContent>(`/notes/folders/${folderSlug}/notes`, { name }).then((r) => r.data);
+export const getFolderNote = (folderSlug: string, noteSlug: string) =>
+  api.get<FolderNoteContent>(`/notes/folders/${folderSlug}/notes/${noteSlug}`).then((r) => r.data);
+export const saveFolderNote = (folderSlug: string, noteSlug: string, content: string) =>
+  api.put<FolderNoteContent>(`/notes/folders/${folderSlug}/notes/${noteSlug}`, { content }).then((r) => r.data);
+export const renameFolderNote = (folderSlug: string, noteSlug: string, name: string) =>
+  api.patch<FolderNote>(`/notes/folders/${folderSlug}/notes/${noteSlug}`, { name }).then((r) => r.data);
+export const deleteFolderNote = (folderSlug: string, noteSlug: string) =>
+  api.delete(`/notes/folders/${folderSlug}/notes/${noteSlug}`);
+export const moveFolderNote = (folderSlug: string, noteSlug: string, targetFolderSlug: string) =>
+  api.post<{ ok: boolean; newSlug: string; targetFolderSlug: string }>(
+    `/notes/folders/${folderSlug}/notes/${noteSlug}/move`,
+    { targetFolderSlug }
+  ).then((r) => r.data);
