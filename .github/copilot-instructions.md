@@ -59,6 +59,9 @@ docker compose up             # subsequent runs
 ```
 Migrations run automatically on container startup (`prisma migrate deploy && node dist/index.js`).
 
+### Tests & Linting
+There are no test files and no lint/format configuration in this project.
+
 ## Key Conventions
 
 ### Tags stored as JSON string
@@ -68,13 +71,17 @@ Migrations run automatically on container startup (`prisma migrate deploy && nod
 `MatrixEntry` has a unique constraint on `(teamMemberId, dimensionNodeId, snapshotId)` — always use `prisma.matrixEntry.upsert(...)`. Same for `SMEAssignment` which is unique on `(dimensionNodeId, snapshotId)`.
 
 ### Snapshot-scoped data
-Matrix entries and SME assignments are always scoped to a `Snapshot`. The active snapshot is managed globally in `SnapshotContext` (`frontend/src/context/SnapshotContext.tsx`). All pages that display time-varying data should consume `useSnapshot()` to get `activeSnapshot`.
+Matrix entries and SME assignments are always scoped to a `Snapshot`. The active snapshot is managed globally in `SnapshotContext` (`frontend/src/context/SnapshotContext.tsx`). All pages that display time-varying data should consume `useSnapshot()` to get `activeSnapshot`. On first load, `activeSnapshot` auto-initialises to the **last** snapshot in the list (most recent).
 
 ### DimensionNode hierarchy
 `DimensionNode` is self-referential via `parentId`. Top-level nodes have `parentId: null`. The frontend recursively builds trees from flat arrays. `orderIndex` controls sibling ordering.
 
 ### Route/API structure
 Each resource has a dedicated router file in `backend/src/routes/`. All routers create their own `PrismaClient` instance at module level. Frontend API calls are all centralised in `frontend/src/api/client.ts`.
+
+The matrix router (`routes/matrix.ts`) is intentionally mounted at **two** paths in `index.ts`: `/api/matrix` (for GET queries) and `/api/matrix-entry` (for upsert/delete). Both point to the same router instance.
+
+Route parameter IDs must always be cast to string: `const id = String(req.params.id)`.
 
 ### Database location
 Development: set `DATABASE_URL=file:./prisma/dev.db` (or any local path).  

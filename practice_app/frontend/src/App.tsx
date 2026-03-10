@@ -8,21 +8,26 @@ import Timeline from './pages/Timeline';
 import Capabilities from './pages/Capabilities';
 import Settings from './pages/Settings';
 import { SnapshotProvider } from './context/SnapshotContext';
+import { IdleProvider } from './context/IdleContext';
+import LockScreen from './components/LockScreen';
 
 const App: React.FC = () => {
   return (
     <BrowserRouter>
       <SnapshotProvider>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="team" element={<Team />} />
-            <Route path="matrices" element={<Matrices />} />
-            <Route path="timeline" element={<Timeline />} />
-            <Route path="capabilities" element={<Capabilities />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-        </Routes>
+        <IdleProvider>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="team" element={<Team />} />
+              <Route path="matrices" element={<Matrices />} />
+              <Route path="timeline" element={<Timeline />} />
+              <Route path="capabilities" element={<Capabilities />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
+          </Routes>
+          <LockScreen />
+        </IdleProvider>
       </SnapshotProvider>
     </BrowserRouter>
   );

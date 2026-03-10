@@ -1,0 +1,9 @@
+- add timeout screen. after 2mins of inactivity a lock screen appears. there is a single button "open" which when clicked returns the user to the app. this is to act like a privacy screen so that if the user happens to pass by the screen with others watching, they will not be able to see the app.
+- allocation types shoudl be configurable in settings. i.e. i can add or remove allocation types. if i remove a type which is being used a default allocation type of "uncategorised" appears.
+- Seniority types should be configurable in the settings.
+- when the user enters a role name this will be saved so when the user enters the same role for another team member it will show up as an autocomplete option which can be clicked on to select it.
+- on the dashboard page the section "This Week" sholld be at the top under the key metrics (team size, active projects etc)
+- format the zero option in the Matricies view such that if zero is selected for a team member:dimension it is readable. currently the color is such that it is not visible at all. a slightly more visible grey would be appropriate.
+- Capabilities coverage and sme views need to include the dimensions hierarchy other wise it is difficult to understand what each capability relates to.
+- Add a boolean flag to each team member which indicates if they are leaving or not. this flag is to be used in all views and will highlight in a vivid colour the team members stats so it is easy to see where potential gaps could be when they leave (answering, will we have coverage if they leave)
+- what is the difference between skill, competency, knowledge???
