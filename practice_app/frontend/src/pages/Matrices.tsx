@@ -22,7 +22,7 @@ const RATING_LABELS = ['None', 'Awareness', 'Working', 'Skilled', 'Expert'];
 
 const cellBg = (v: number) => {
   const colors = [
-    'bg-white text-gray-300',
+    'bg-gray-100 text-gray-400',
     'bg-indigo-100 text-indigo-600',
     'bg-indigo-200 text-indigo-700',
     'bg-indigo-400 text-white',
