@@ -181,7 +181,7 @@ export const moveCtxFolderNote = (
   ).then((r) => r.data);
 
 // ── AI / Ollama ───────────────────────────────────────────────────────────────
-import type { AiConfig, AiStatus, OllamaModel } from '../types';
+import type { AiConfig, AiStatus, OllamaModel, AiPrompts } from '../types';
 
 export const getAiStatus  = () => api.get<AiStatus>('/ai/status').then((r) => r.data);
 export const getAiConfig  = () => api.get<AiConfig>('/ai/config').then((r) => r.data);
@@ -217,3 +217,9 @@ export async function* pullAiModel(
 
 export const summariseNote = (content: string, model?: string) =>
   api.post<{ summary: string }>('/ai/summarise', { content, model }).then((r) => r.data);
+
+export const getAiPrompts  = () => api.get<AiPrompts>('/ai/prompts').then((r) => r.data);
+export const saveAiPrompts = (prompts: Partial<AiPrompts>) =>
+  api.put<AiPrompts>('/ai/prompts', prompts).then((r) => r.data);
+export const resetAiPrompt = (key: keyof AiPrompts) =>
+  api.delete<AiPrompts>(`/ai/prompts/${key}`).then((r) => r.data);

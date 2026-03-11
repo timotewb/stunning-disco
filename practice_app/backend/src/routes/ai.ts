@@ -40,6 +40,49 @@ function resolveOllamaUrl(cfg: AiConfig): string {
   return process.env.OLLAMA_URL ?? 'http://localhost:11434';
 }
 
+// ── Prompt persistence ────────────────────────────────────────────────────────
+
+export interface AiPrompts {
+  noteSummarise: string;
+}
+
+export const DEFAULT_PROMPTS: AiPrompts = {
+  noteSummarise: `You are a concise assistant. Read the following note and produce a brief summary block.
+Format your response EXACTLY as markdown like this:
+
+---
+**AI Summary** *({date})*
+
+**Key points:**
+- point one
+- point two
+
+**Actions:**
+- action one (if any)
+---`,
+};
+
+function getPromptsPath(): string {
+  return path.join(path.dirname(getConfigPath()), 'ai-prompts.json');
+}
+
+function readPrompts(): AiPrompts {
+  const p = getPromptsPath();
+  if (fs.existsSync(p)) {
+    try {
+      const stored = JSON.parse(fs.readFileSync(p, 'utf-8')) as Partial<AiPrompts>;
+      return { ...DEFAULT_PROMPTS, ...stored };
+    } catch { /* fall through */ }
+  }
+  return { ...DEFAULT_PROMPTS };
+}
+
+function writePrompts(prompts: AiPrompts): void {
+  const p = getPromptsPath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(prompts, null, 2));
+}
+
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 async function ollamaPost(baseUrl: string, apiPath: string, body: unknown): Promise<unknown> {
@@ -153,6 +196,34 @@ router.delete('/models/:name', async (req: Request, res: Response) => {
   }
 });
 
+// ── Prompts ───────────────────────────────────────────────────────────────────
+
+// GET /api/ai/prompts
+router.get('/prompts', (_req: Request, res: Response) => {
+  res.json(readPrompts());
+});
+
+// PUT /api/ai/prompts  { noteSummarise?: string, ... }
+router.put('/prompts', (req: Request, res: Response) => {
+  const current = readPrompts();
+  const updated: AiPrompts = { ...current };
+  for (const key of Object.keys(DEFAULT_PROMPTS) as (keyof AiPrompts)[]) {
+    if (typeof req.body[key] === 'string') updated[key] = req.body[key];
+  }
+  writePrompts(updated);
+  res.json(updated);
+});
+
+// DELETE /api/ai/prompts/:key — reset a single prompt to its default
+router.delete('/prompts/:key', (req: Request, res: Response) => {
+  const key = req.params.key as keyof AiPrompts;
+  if (!(key in DEFAULT_PROMPTS)) return res.status(400).json({ error: 'Unknown prompt key' });
+  const current = readPrompts();
+  current[key] = DEFAULT_PROMPTS[key];
+  writePrompts(current);
+  res.json(current);
+});
+
 // ── Summarise ─────────────────────────────────────────────────────────────────
 
 // POST /api/ai/summarise  { content: string, model?: string }
@@ -162,24 +233,14 @@ router.post('/summarise', async (req: Request, res: Response) => {
   if (!content?.trim()) return res.status(400).json({ error: 'content required' });
   const url = resolveOllamaUrl(readConfig());
   const date = new Date().toLocaleDateString('en', { year: 'numeric', month: 'long', day: 'numeric' });
-  const prompt = `You are a concise assistant. Read the following note and produce a brief summary block.
-Format your response EXACTLY as markdown like this:
-
----
-**AI Summary** *(${date})*
-
-**Key points:**
-- point one
-- point two
-
-**Actions:**
-- action one (if any)
----
-
-Note:
-${content}`;
+  const systemPrompt = readPrompts().noteSummarise.replace(/\{date\}/g, date);
   try {
-    const result = await ollamaPost(url, '/api/generate', { model, prompt, stream: false }) as { response: string };
+    const result = await ollamaPost(url, '/api/generate', {
+      model,
+      system: systemPrompt,
+      prompt: content,
+      stream: false,
+    }) as { response: string };
     res.json({ summary: result.response.trim() });
   } catch (err) {
     res.status(502).json({ error: 'Ollama request failed: ' + String(err) });

@@ -129,3 +129,7 @@ export interface AiStatus extends AiConfig {
   version?: string;
   models: string[];
 }
+
+export interface AiPrompts {
+  noteSummarise: string;
+}

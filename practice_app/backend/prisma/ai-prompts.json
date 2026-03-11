@@ -1,0 +1,3 @@
+{
+  "noteSummarise": "You are a concise assistant. Read the following note and produce a brief summary block.\nFormat your response EXACTLY as markdown like this:\n\n---\n**AI Summary** *({date})*\n\n**Key points:**\n- point one\n- point two\n\n**Actions:**\n- action one (if any)\n---"
+}

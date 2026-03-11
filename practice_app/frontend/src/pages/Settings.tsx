@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
-import type { Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig, AiStatus, OllamaModel } from '../types';
+import type { Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig, AiStatus, OllamaModel, AiPrompts } from '../types';
 import {
   getDimensions,
   createDimension,
@@ -23,6 +23,9 @@ import {
   getAiModels,
   deleteAiModel,
   pullAiModel,
+  getAiPrompts,
+  saveAiPrompts,
+  resetAiPrompt,
 } from '../api/client';
 import { useSnapshot } from '../context/SnapshotContext';
 
@@ -71,6 +74,13 @@ const Settings: React.FC = () => {
   const [pulling, setPulling]           = useState(false);
   const [pullProgress, setPullProgress] = useState<{ status: string; completed?: number; total?: number } | null>(null);
   const [confirmDeleteModel, setConfirmDeleteModel] = useState<string | null>(null);
+
+  // AI Prompts state
+  const [aiPrompts, setAiPrompts]               = useState<AiPrompts | null>(null);
+  const [promptDraft, setPromptDraft]           = useState<Partial<AiPrompts>>({});
+  const [promptSaving, setPromptSaving]         = useState<keyof AiPrompts | null>(null);
+  const [promptSaved, setPromptSaved]           = useState<keyof AiPrompts | null>(null);
+  const [promptResetting, setPromptResetting]   = useState<keyof AiPrompts | null>(null);
 
   const AVAILABLE_COLORS = ['indigo','amber','green','blue','purple','rose','teal','orange','cyan','pink','gray'];
   const COLOR_SWATCHES: Record<string, string> = {
@@ -127,7 +137,13 @@ const Settings: React.FC = () => {
     }
   };
 
-  useEffect(() => { load(); loadSnapshots(); loadAllocTypes(); loadSeniorityConfigs(); loadAiStatus(); }, []);
+  const loadAiPrompts = async () => {
+    const p = await getAiPrompts();
+    setAiPrompts(p);
+    setPromptDraft({ noteSummarise: p.noteSummarise });
+  };
+
+  useEffect(() => { load(); loadSnapshots(); loadAllocTypes(); loadSeniorityConfigs(); loadAiStatus(); loadAiPrompts(); }, []);
 
   const toggleDim = (id: string) => {
     setExpandedDims((prev) => {
@@ -319,6 +335,31 @@ const Settings: React.FC = () => {
       handleSelectModel(next);
     }
     setConfirmDeleteModel(null);
+  };
+
+  const handleSavePrompt = async (key: keyof AiPrompts) => {
+    if (promptSaving) return;
+    setPromptSaving(key);
+    try {
+      const updated = await saveAiPrompts({ [key]: promptDraft[key] });
+      setAiPrompts(updated);
+      setPromptSaved(key);
+      setTimeout(() => setPromptSaved(null), 2000);
+    } finally {
+      setPromptSaving(null);
+    }
+  };
+
+  const handleResetPrompt = async (key: keyof AiPrompts) => {
+    if (promptResetting) return;
+    setPromptResetting(key);
+    try {
+      const updated = await resetAiPrompt(key);
+      setAiPrompts(updated);
+      setPromptDraft((d) => ({ ...d, [key]: updated[key] }));
+    } finally {
+      setPromptResetting(null);
+    }
   };
 
   return (
@@ -910,6 +951,61 @@ const Settings: React.FC = () => {
             </>
           )}
         </div>
+      </section>
+
+      {/* ── AI Prompts ───────────────────────────────────────── */}
+      <section className="mt-10">
+        <h3 className="text-lg font-semibold text-gray-800 mb-1">AI Prompts</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Customise the system prompts sent to Ollama for each AI feature.
+          Use <code className="bg-gray-100 px-1 rounded text-xs">{'{date}'}</code> and it will be replaced with today's date at call time.
+        </p>
+
+        {!aiPrompts ? (
+          <div className="text-sm text-gray-400">Loading…</div>
+        ) : (
+          <div className="space-y-6">
+
+            {/* Notes: Summarise */}
+            <div className="bg-white rounded-xl border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-medium text-gray-800">Notes — Summarise</p>
+                <button
+                  onClick={() => handleResetPrompt('noteSummarise')}
+                  disabled={!!promptResetting}
+                  className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-40 transition-colors">
+                  {promptResetting === 'noteSummarise' ? 'Resetting…' : 'Reset to default'}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">
+                Sent as the system instruction when the Summarise button is clicked in the Notes editor.
+              </p>
+              <textarea
+                value={promptDraft.noteSummarise ?? ''}
+                onChange={(e) => setPromptDraft((d) => ({ ...d, noteSummarise: e.target.value }))}
+                rows={12}
+                className="w-full px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg
+                           focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-y"
+              />
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  onClick={() => handleSavePrompt('noteSummarise')}
+                  disabled={!!promptSaving}
+                  className="px-4 py-1.5 text-sm bg-indigo-600 text-white rounded-lg
+                             hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-1.5">
+                  {promptSaving === 'noteSummarise' && <Loader2 size={12} className="animate-spin" />}
+                  Save
+                </button>
+                {promptSaved === 'noteSummarise' && (
+                  <span className="flex items-center gap-1 text-xs text-green-600">
+                    <Check size={12} /> Saved
+                  </span>
+                )}
+              </div>
+            </div>
+
+          </div>
+        )}
       </section>
     </div>
   );
