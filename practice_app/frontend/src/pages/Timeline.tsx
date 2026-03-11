@@ -3,6 +3,31 @@ import { Plus, Pencil, Trash2, X, Check, Download, AlertTriangle } from 'lucide-
 import type { Allocation, TeamMember, AllocationTypeConfig } from '../types';
 import { getAllocations, getTeam, createAllocation, updateAllocation, deleteAllocation, getAllocationTypes } from '../api/client';
 
+const LANE_H = 30; // px per lane slot (bar height + gap)
+const V_PAD = 4;   // vertical padding inside the track area
+
+/** Assigns each allocation to the lowest available lane so overlapping bars stack vertically. */
+function assignLanes(allocs: Allocation[]): { alloc: Allocation; lane: number }[] {
+  const sorted = [...allocs].sort(
+    (a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+  );
+  const laneEnds: Date[] = [];
+  const result: { alloc: Allocation; lane: number }[] = [];
+  for (const alloc of sorted) {
+    const s = new Date(alloc.startDate);
+    const e = new Date(alloc.endDate);
+    let idx = laneEnds.findIndex((end) => s >= end);
+    if (idx === -1) {
+      idx = laneEnds.length;
+      laneEnds.push(e);
+    } else {
+      laneEnds[idx] = e;
+    }
+    result.push({ alloc, lane: idx });
+  }
+  return result;
+}
+
 const PRESET_COLORS: Record<string, { bar: string; badge: string }> = {
   indigo: { bar: 'bg-indigo-500', badge: 'bg-indigo-100 text-indigo-700' },
   amber:  { bar: 'bg-amber-400',  badge: 'bg-amber-100 text-amber-700'  },
@@ -239,24 +264,29 @@ const Timeline: React.FC = () => {
               const colors = typeColors(allocationTypes);
               return team.map((member) => {
                 const memberAllocs = visibleAllocations.filter((a) => a.teamMemberId === member.id);
+                const laned = assignLanes(memberAllocs);
+                const numLanes = Math.max(1, ...laned.map(({ lane }) => lane + 1));
+                const rowHeight = V_PAD * 2 + numLanes * LANE_H;
                 return (
-                  <div key={member.id} className={`flex border-b min-h-[48px] ${member.isLeaving ? 'bg-amber-50 hover:bg-amber-100 border-amber-100' : 'border-gray-100 hover:bg-gray-50'}`}>
+                  <div key={member.id} className={`flex border-b ${member.isLeaving ? 'bg-amber-50 hover:bg-amber-100 border-amber-100' : 'border-gray-100 hover:bg-gray-50'}`} style={{ minHeight: rowHeight }}>
                     <div className={`w-40 flex-shrink-0 px-4 flex items-center gap-1.5 text-sm font-medium border-r ${member.isLeaving ? 'text-amber-700 border-amber-200' : 'text-gray-800 border-gray-100'}`}>
                       {member.isLeaving && <AlertTriangle size={12} className="text-orange-500 flex-shrink-0" />}
                       <span className="truncate">{member.name}</span>
                     </div>
-                    <div className="flex-1 relative py-2">
-                      {memberAllocs.map((a) => {
+                    <div className="flex-1 relative" style={{ minHeight: rowHeight }}>
+                      {laned.map(({ alloc: a, lane }) => {
                         const s = new Date(a.startDate);
                         const e = new Date(a.endDate);
                         const left = leftPct(s);
                         const width = widthPct(s, e);
                         const displayType = colors[a.type] ? a.type : 'uncategorised';
+                        const barTop = V_PAD + lane * LANE_H;
+                        const barHeight = LANE_H - 4;
                         return (
                           <div
                             key={a.id}
-                            className={`absolute top-1 bottom-1 rounded-md flex items-center px-2 text-xs text-white cursor-pointer ${colors[displayType].bar}`}
-                            style={{ left: `${left}%`, width: `${width}%` }}
+                            className={`absolute rounded-md flex items-center px-2 text-xs text-white cursor-pointer ${colors[displayType].bar}`}
+                            style={{ left: `${left}%`, width: `${width}%`, top: barTop, height: barHeight }}
                             onClick={() => openEdit(a)}
                             title={`${a.projectName} (${displayType})`}
                           >
