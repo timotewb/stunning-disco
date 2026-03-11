@@ -426,15 +426,16 @@ const Notes: React.FC = () => {
     setSaveStatus('saving');
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
-      if (activePane === 'date') {
-        if (noteContext === 'daily') await saveNote(selectedDate, val);
-        else if (noteContext === 'member' && slug) await saveMemberNote(slug, selectedDate, val);
-        refreshList();
+      // isFolders must be checked first — activePane stays 'date' in folders mode
+      if (isFolders && selectedFolderSlug && selectedNoteSlug) {
+        await saveFolderNote(selectedFolderSlug, selectedNoteSlug, val);
       } else if (activePane === 'ctx-folder' && ctxFolderSlug && ctxNoteSlug) {
         const ctx = noteContext as 'daily' | 'member';
         await saveCtxFolderNote(ctx, ctxFolderSlug, ctxNoteSlug, val, ctx === 'member' ? slug : undefined);
-      } else if (isFolders && selectedFolderSlug && selectedNoteSlug) {
-        await saveFolderNote(selectedFolderSlug, selectedNoteSlug, val);
+      } else if (activePane === 'date') {
+        if (noteContext === 'daily') await saveNote(selectedDate, val);
+        else if (noteContext === 'member' && slug) await saveMemberNote(slug, selectedDate, val);
+        refreshList();
       }
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
