@@ -285,6 +285,7 @@ const Notes: React.FC = () => {
   // ── AI state ──────────────────────────────────────────────────────────────
   const [aiAvailable, setAiAvailable] = useState(false);
   const [summarising, setSummarising] = useState(false);
+  const [summariseError, setSummariseError] = useState<string | null>(null);
   const [aiModel] = useState(() => localStorage.getItem('kaimahi_ai_model') ?? 'llama3.2:3b');
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -451,14 +452,17 @@ const Notes: React.FC = () => {
   const handleSummarise = async () => {
     if (!activeContent.trim() || summarising) return;
     setSummarising(true);
+    setSummariseError(null);
     try {
       const { summary } = await summariseNote(activeContent, aiModel);
       const updated = summary + '\n\n' + activeContent;
       if (isFolders) setFolderContent(updated);
       else setContent(updated);
       scheduleSave(updated);
-    } catch {
-      // silently ignore — Ollama may have become unavailable
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+        ?? (err instanceof Error ? err.message : 'Summarise failed');
+      setSummariseError(msg);
     } finally {
       setSummarising(false);
     }
@@ -889,6 +893,12 @@ const Notes: React.FC = () => {
                       : <Sparkles size={13} />}
                     Summarise
                   </button>
+                  {summariseError && (
+                    <span className="flex items-center gap-1 text-xs text-red-500 max-w-xs truncate" title={summariseError}>
+                      <X size={11} className="flex-shrink-0" />
+                      {summariseError}
+                    </span>
+                  )}
                 </div>
               </div>
 

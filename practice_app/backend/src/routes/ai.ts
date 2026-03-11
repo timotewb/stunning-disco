@@ -104,7 +104,15 @@ async function ollamaPost(baseUrl: string, apiPath: string, body: unknown): Prom
     }, (res) => {
       let data = '';
       res.on('data', (c) => { data += c; });
-      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(data); } });
+      res.on('end', () => {
+        let parsed: unknown;
+        try { parsed = JSON.parse(data); } catch { parsed = data; }
+        if (res.statusCode && res.statusCode >= 400) {
+          const msg = (parsed as { error?: string })?.error ?? `HTTP ${res.statusCode}`;
+          return reject(new Error(msg));
+        }
+        resolve(parsed);
+      });
     });
     req.on('error', reject);
     req.write(payload);
@@ -119,6 +127,32 @@ async function ollamaGet(baseUrl: string, apiPath: string): Promise<unknown> {
       res.on('data', (c) => { data += c; });
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(data); } });
     }).on('error', reject);
+  });
+}
+
+async function ollamaDelete(baseUrl: string, apiPath: string, body: unknown): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const url = new URL(apiPath, baseUrl);
+    const req = http.request(url, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => {
+        let parsed: unknown;
+        try { parsed = JSON.parse(data); } catch { parsed = data; }
+        if (res.statusCode && res.statusCode >= 400) {
+          const msg = (parsed as { error?: string })?.error ?? `HTTP ${res.statusCode}`;
+          return reject(new Error(msg));
+        }
+        resolve(parsed);
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
   });
 }
 
@@ -198,7 +232,7 @@ router.post('/models/pull', (req: Request, res: Response) => {
 router.delete('/models/:name', async (req: Request, res: Response) => {
   const url = resolveOllamaUrl(readConfig());
   try {
-    await ollamaPost(url, '/api/delete', { name: req.params.name });
+    await ollamaDelete(url, '/api/delete', { name: req.params.name });
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: String(err) });
