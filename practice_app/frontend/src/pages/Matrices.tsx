@@ -202,10 +202,10 @@ const Matrices: React.FC = () => {
           return (
             <button
               onClick={() => setEditingCell({ memberId: row.original.id, nodeId: node.id })}
-              className={`w-9 h-9 rounded text-sm font-semibold transition-colors ${cellBg(val)}`}
-              title={`${RATING_LABELS[val]} — click to edit`}
+              className={`w-9 h-9 rounded text-sm font-semibold transition-colors ${entry !== undefined ? cellBg(val) : 'bg-white text-gray-300 hover:bg-gray-50'}`}
+              title={entry !== undefined ? `${RATING_LABELS[val]} — click to edit` : 'Not rated — click to edit'}
             >
-              {val > 0 ? val : ''}
+              {entry !== undefined ? val : ''}
             </button>
           );
         },
