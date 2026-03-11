@@ -5,146 +5,122 @@
 | Phase | Feature |
 |---|---|
 | Phase 1 (now) | AI summary button in Notes — prepends a short summary of key points/actions to the current note |
-| Phase 2 (future) | Full data access — Ollama can read notes + SQLite to answer questions, extract actions, populate a Kanban board, etc. |
+| Phase 2 (future) | Full data access — Ollama reads notes + SQLite to answer questions, extract actions, populate a Kanban board, etc. |
 
 ---
 
-## 2. Architecture options
+## 2. Deployment options
 
-### Option A — Ollama inside the same container ❌ Not recommended
+kaimahi supports two Ollama deployment modes. The user selects and switches between them from the Settings page at any time — no restart or config file editing required.
 
-Run the Ollama binary alongside Node.js in the existing `node:20-alpine` image, using a shell script to start both processes.
+### Mode A — Local installation (recommended for Mac)
 
-**Why it sounds appealing:** single image, single `docker compose up`.
-
-**Why it is the wrong choice:**
-
-| Problem | Detail |
-|---|---|
-| No GPU on Mac | Docker Desktop for Mac runs containers inside a Linux VM. It cannot access Apple Metal. An embedded Ollama runs CPU-only, making even a 3B model slow (~20–60 s per summarise call). |
-| Image size bloat | The Ollama binary is ~50 MB; models are 2–8 GB each. Storing models in the image is impractical. Storing them in the data volume (`/app/data`) works, but now model files live alongside the SQLite database, which is messy. |
-| No independent updates | Updating Ollama means rebuilding and redeploying the entire kaimahi image. |
-| Process supervision complexity | Alpine has no init system. You need `supervisord` or a fragile `&`/`wait` shell script to manage two long-lived processes. |
-| Port conflict risk | Ollama binds to 11434 internally; nothing exposes it, which is fine for now, but it makes future debugging harder. |
-
----
-
-### Option B — Ollama as a separate docker-compose service ✅ Recommended
-
-Add an `ollama` service to `docker-compose.yml` using the official `ollama/ollama` image. kaimahi's backend proxies requests to it over the internal Docker network.
-
-```
-┌─────────────────────────────────────────────────────┐
-│  docker-compose                                      │
-│                                                      │
-│  ┌──────────────────┐       ┌─────────────────────┐ │
-│  │  kaimahi (3000)  │──────▶│  ollama (11434)      │ │
-│  │  Express + React │  http │  ollama/ollama image │ │
-│  └──────────────────┘       └─────────────────────┘ │
-│         │                          │                 │
-│  ~/practice-data            ollama_data volume       │
-└─────────────────────────────────────────────────────┘
-         ▲ browser
-```
-
-**Advantages:**
-
-- Official, maintained image — `docker pull ollama/ollama` gets the latest release.
-- Models live in their own named Docker volume (`ollama_data`) — clean separation from app data.
-- Updating Ollama = `docker compose pull ollama && docker compose up -d ollama`. kaimahi image is untouched.
-- kaimahi backend uses `OLLAMA_URL=http://ollama:11434` — one env var to point anywhere.
-- Works identically on Linux servers (with GPU passthrough if available).
-
-**GPU note for Apple Silicon (arm64 Mac):**
-Docker Desktop on macOS does **not** pass Metal through to containers. The Ollama container runs CPU-only regardless of which option you choose. For maximum performance on a Mac, see the "GPU acceleration" note in Section 5.
-
----
-
-### Option C — Native Ollama on Mac host ✅ Recommended for Mac
-
-Install Ollama directly on macOS (`brew install ollama`), run `ollama serve` as a background service, and point kaimahi at it via `http://host.docker.internal:11434`. Docker Desktop automatically resolves `host.docker.internal` to the Mac host's loopback, so the kaimahi container can reach the native Ollama process with no extra networking configuration.
+The user installs Ollama natively on their machine. kaimahi connects to it via `http://host.docker.internal:11434` (from inside the Docker container) or `http://localhost:11434` (local dev).
 
 ```
   macOS host
-  ┌──────────────────────────────────────────────────────────┐
-  │                                                          │
-  │   ollama serve  ◀──────────── Metal GPU (full speed)    │
-  │   port 11434                                             │
-  │                   ▲                                      │
-  │                   │ host.docker.internal:11434            │
-  │   ┌───────────────┴──────────────────────────────────┐  │
-  │   │  docker-compose                                   │  │
-  │   │                                                   │  │
-  │   │  ┌──────────────────┐                            │  │
-  │   │  │  kaimahi (3000)  │                            │  │
-  │   │  │  Express + React │                            │  │
-  │   │  └──────────────────┘                            │  │
-  │   └───────────────────────────────────────────────────┘  │
-  └──────────────────────────────────────────────────────────┘
-            ▲ browser
+  ┌─────────────────────────────────────────────────────────┐
+  │                                                         │
+  │   ollama serve  ◀──────── Apple Metal GPU (full speed) │
+  │   port 11434                                            │
+  │                   ▲                                     │
+  │                   │ host.docker.internal:11434           │
+  │   ┌───────────────┴─────────────────────────────────┐  │
+  │   │  docker-compose                                  │  │
+  │   │  ┌──────────────────┐                           │  │
+  │   │  │  kaimahi (3000)  │                           │  │
+  │   │  └──────────────────┘                           │  │
+  │   └─────────────────────────────────────────────────┘  │
+  └─────────────────────────────────────────────────────────┘
 ```
 
-**Why this is faster on Mac:**
+**Performance:** Docker Desktop on macOS runs containers inside a Linux VM with no Metal GPU access. Native Ollama bypasses this entirely.
 
-Docker Desktop runs containers inside a **Linux VM**. That VM has no access to Apple Metal. Any Ollama running inside Docker — whether in the kaimahi container or a separate service — is CPU-only.
-
-Native `ollama serve` runs directly on macOS and uses **Metal Performance Shaders** (MPS) via the full Apple Silicon GPU and unified memory.
-
-| Setup | llama3.2:3b typical throughput | Summarise call latency |
+| Setup | llama3.2:3b throughput | Summarise latency |
 |---|---|---|
-| Ollama in Docker (any option) | ~20–50 tok/s (CPU only) | ~25–50 s |
+| Ollama in Docker (any) | ~20–50 tok/s (CPU only) | ~25–50 s |
 | `ollama serve` native on Mac | ~80–150 tok/s (Metal GPU) | ~3–8 s |
 
-The difference is roughly 5–10× — significant enough to matter for interactive use.
-
-**Setup:**
-
+**Mac setup:**
 ```bash
 brew install ollama
-brew services start ollama   # runs ollama serve on login
-ollama pull llama3.2:3b      # download default model (~2 GB)
+brew services start ollama   # auto-starts on login
+ollama pull llama3.2:3b
 ```
-
-Then in `docker-compose.yml`, set:
-
-```yaml
-environment:
-  - OLLAMA_URL=http://host.docker.internal:11434
-```
-
-No `ollama` service or `ollama_data` volume needed in compose.
-
-**Trade-offs vs Option B:**
-
-| | Option B (Docker service) | Option C (native Mac) |
-|---|---|---|
-| GPU on Mac | ❌ CPU only | ✅ Full Metal |
-| Self-contained | ✅ One `docker compose up` | ⚠️ Requires brew install |
-| Linux server | ✅ Works (+ Nvidia GPU) | N/A |
-| Model updates | `docker exec ollama ollama pull …` | `ollama pull …` in terminal |
-| Portability | ✅ Works anywhere Docker runs | macOS only |
 
 ---
 
-## 3. Recommended approach: configurable `OLLAMA_URL`
+### Mode B — Docker container (recommended for Linux / servers)
 
-The backend uses a single `OLLAMA_URL` environment variable, defaulting to `http://localhost:11434`. This decouples kaimahi from how Ollama is deployed and lets each user choose the right option for their environment:
+An `ollama/ollama` container runs alongside kaimahi in the same docker-compose stack. Communication happens over the internal Docker network.
 
-| Environment | `OLLAMA_URL` value | Ollama setup |
-|---|---|---|
-| Mac (recommended) | `http://host.docker.internal:11434` | `brew install ollama && brew services start ollama` |
-| Linux server | `http://ollama:11434` | Option B docker-compose service |
-| Local dev (no Docker) | `http://localhost:11434` | `ollama serve` in a terminal |
-
-**For a new Mac user**, the getting-started flow becomes:
-
-```bash
-brew install ollama && brew services start ollama && ollama pull llama3.2:3b
-# edit docker-compose.yml: OLLAMA_URL=http://host.docker.internal:11434
-docker compose up
+```
+┌───────────────────────────────────────────────────────┐
+│  docker-compose                                        │
+│                                                        │
+│  ┌──────────────────┐       ┌───────────────────────┐ │
+│  │  kaimahi (3000)  │──────▶│  ollama (11434)        │ │
+│  │  Express + React │  http │  ollama/ollama image   │ │
+│  └──────────────────┘       └───────────────────────┘ │
+│         │                           │                  │
+│  ~/practice-data            ollama_data volume         │
+└───────────────────────────────────────────────────────┘
+         ▲ browser
 ```
 
-This gives the best performance with minimal complexity.
+Advantages:
+- Fully self-contained — one `docker compose up` starts everything
+- Ollama updates independently: `docker compose pull ollama && docker compose up -d ollama`
+- Works on Linux with Nvidia/AMD GPU passthrough
+- Models stored in a named Docker volume, separate from app data
+
+---
+
+### Option C — Same container ❌ Not recommended
+
+Running Ollama inside the kaimahi container alongside Node.js is technically possible but ruled out:
+- No GPU on Mac regardless
+- Models (2–8 GB) pollute the app image or data volume
+- Requires a process supervisor (supervisord) on Alpine
+- Updating Ollama requires rebuilding the entire kaimahi image
+
+---
+
+## 3. Runtime mode selection (in-app)
+
+The user chooses and switches between Mode A and Mode B from the **Settings → AI** page. The choice is persisted server-side in `/app/data/ai-config.json` so it survives container restarts without rebuilding anything.
+
+### Config file (`/app/data/ai-config.json`)
+
+```json
+{
+  "mode": "local",
+  "customUrl": null
+}
+```
+
+| Field | Values | Description |
+|---|---|---|
+| `mode` | `"local"` \| `"docker"` | Which preset to use |
+| `customUrl` | `string \| null` | Overrides the preset URL if set |
+
+Effective Ollama URL resolution (in order of priority):
+1. `customUrl` if not null
+2. `mode === "local"` → `http://host.docker.internal:11434`
+3. `mode === "docker"` → `http://ollama:11434`
+4. Fallback: `OLLAMA_URL` env var → `http://localhost:11434`
+
+> **Dev note:** In local development (no Docker), `host.docker.internal` does not resolve. Set `OLLAMA_URL=http://localhost:11434` as an env var and leave `customUrl` null — the env var fallback takes over.
+
+### Availability check
+
+The backend `/api/ai/status` endpoint is the single source of truth for whether Ollama is reachable. It is called:
+- On Settings page mount
+- After the user changes the Ollama mode/URL in Settings
+- On Notes page mount (to gate the Summarise button)
+- Optionally: on a 60-second polling interval in the frontend
+
+The endpoint returns the current config alongside connection state so the frontend always knows what mode is active.
 
 ---
 
@@ -153,10 +129,10 @@ This gives the best performance with minimal complexity.
 | Model | Size | Best for |
 |---|---|---|
 | `llama3.2:3b` | ~2.0 GB | Best default — fast on both Metal and CPU |
-| `qwen2.5:7b` | ~4.7 GB | Higher quality summaries and structured extraction; comfortable on Metal, slow on CPU |
-| `phi4-mini` | ~2.5 GB | Good reasoning, efficient; reasonable on CPU if Metal unavailable |
+| `qwen2.5:7b` | ~4.7 GB | Higher quality; use on Metal, slow on CPU |
+| `phi4-mini` | ~2.5 GB | Good reasoning, reasonable on CPU |
 
-**Suggested default:** `llama3.2:3b` — good quality/speed on any setup. Users with Metal can comfortably run `qwen2.5:7b` for better output quality.
+**Suggested default:** `llama3.2:3b`. Users on Metal can upgrade to `qwen2.5:7b` for better output quality.
 
 ---
 
@@ -164,9 +140,7 @@ This gives the best performance with minimal complexity.
 
 ### 5.1 docker-compose.yml
 
-Two variants depending on deployment target.
-
-**Mac (recommended — native Ollama for Metal GPU):**
+Ship a single `docker-compose.yml` that includes the `ollama` service. Mac users who prefer native Ollama simply don't start it (`docker compose up app`) or switch mode in Settings.
 
 ```yaml
 version: '3.8'
@@ -180,32 +154,16 @@ services:
     environment:
       - DATABASE_URL=file:/app/data/practice.db
       - NODE_ENV=production
-      - OLLAMA_URL=http://host.docker.internal:11434
-```
-
-Pre-requisite: `brew install ollama && brew services start ollama && ollama pull llama3.2:3b`
-
-**Linux server (self-contained, Ollama as docker-compose service):**
-
-```yaml
-version: '3.8'
-services:
-  app:
-    build: .
-    ports:
-      - "3000:3000"
-    volumes:
-      - ~/practice-data:/app/data
-    environment:
-      - DATABASE_URL=file:/app/data/practice.db
-      - NODE_ENV=production
+      # OLLAMA_URL is the env-var fallback only.
+      # The active URL is managed in Settings and stored in ai-config.json.
+      # Default here targets the docker service; override for native Ollama.
       - OLLAMA_URL=http://ollama:11434
     depends_on:
       - ollama
 
   ollama:
     image: ollama/ollama
-    # Nvidia GPU: add the deploy.resources block below
+    # Nvidia GPU on Linux: uncomment below
     # deploy:
     #   resources:
     #     reservations:
@@ -220,34 +178,68 @@ volumes:
   ollama_data:
 ```
 
+**Mac users who want native Ollama** can either:
+- Change `OLLAMA_URL=http://host.docker.internal:11434` and skip starting the `ollama` service, **or**
+- Leave compose unchanged and switch to Mode A in the Settings UI (which sets `customUrl` / `mode` in `ai-config.json`)
+
 ---
 
 ### 5.2 Backend — `backend/src/routes/ai.ts` (new file)
 
-This router proxies all Ollama interactions. The frontend never calls Ollama directly.
-
 ```typescript
 import { Router, Request, Response } from 'express';
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
 
 const router = Router();
-const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── Config persistence ────────────────────────────────────────────────────────
 
-async function ollamaPost(path: string, body: unknown): Promise<unknown> {
+interface AiConfig {
+  mode: 'local' | 'docker';
+  customUrl: string | null;
+}
+
+function getConfigPath(): string {
+  const dbUrl = process.env.DATABASE_URL ?? 'file:/app/data/practice.db';
+  const dbPath = dbUrl.replace(/^file:/, '');
+  const absDb = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
+  return path.join(path.dirname(absDb), 'ai-config.json');
+}
+
+function readConfig(): AiConfig {
+  const p = getConfigPath();
+  if (fs.existsSync(p)) {
+    try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { /* fall through */ }
+  }
+  return { mode: 'docker', customUrl: null };
+}
+
+function writeConfig(cfg: AiConfig): void {
+  fs.writeFileSync(getConfigPath(), JSON.stringify(cfg, null, 2));
+}
+
+function resolveOllamaUrl(cfg: AiConfig): string {
+  if (cfg.customUrl) return cfg.customUrl;
+  if (cfg.mode === 'local') return 'http://host.docker.internal:11434';
+  if (cfg.mode === 'docker') return 'http://ollama:11434';
+  return process.env.OLLAMA_URL ?? 'http://localhost:11434';
+}
+
+// ── HTTP helpers ──────────────────────────────────────────────────────────────
+
+async function ollamaPost(baseUrl: string, apiPath: string, body: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
-    const url = new URL(path, OLLAMA_URL);
+    const url = new URL(apiPath, baseUrl);
     const req = http.request(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
     }, (res) => {
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); } catch { resolve(data); }
-      });
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(data); } });
     });
     req.on('error', reject);
     req.write(payload);
@@ -255,61 +247,86 @@ async function ollamaPost(path: string, body: unknown): Promise<unknown> {
   });
 }
 
-async function ollamaGet(path: string): Promise<unknown> {
+async function ollamaGet(baseUrl: string, apiPath: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const url = new URL(path, OLLAMA_URL);
-    http.get(url, (res) => {
+    http.get(new URL(apiPath, baseUrl), (res) => {
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); } catch { resolve(data); }
-      });
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(data); } });
     }).on('error', reject);
   });
 }
 
-// ── status ───────────────────────────────────────────────────────────────────
+// ── Config routes ─────────────────────────────────────────────────────────────
+
+// GET /api/ai/config
+// Returns the current stored config + resolved URL
+router.get('/config', (req: Request, res: Response) => {
+  const cfg = readConfig();
+  res.json({ ...cfg, resolvedUrl: resolveOllamaUrl(cfg) });
+});
+
+// PUT /api/ai/config  { mode: 'local' | 'docker', customUrl?: string | null }
+router.put('/config', (req: Request, res: Response) => {
+  const { mode, customUrl = null } = req.body as Partial<AiConfig>;
+  if (mode !== 'local' && mode !== 'docker') {
+    return res.status(400).json({ error: 'mode must be "local" or "docker"' });
+  }
+  const cfg: AiConfig = { mode, customUrl: customUrl ?? null };
+  writeConfig(cfg);
+  res.json({ ...cfg, resolvedUrl: resolveOllamaUrl(cfg) });
+});
+
+// ── Status ────────────────────────────────────────────────────────────────────
 
 // GET /api/ai/status
-// Returns { connected: bool, version?: string, models: string[] }
+// Returns { connected, version?, models[], mode, resolvedUrl }
 router.get('/status', async (_req: Request, res: Response) => {
+  const cfg = readConfig();
+  const url = resolveOllamaUrl(cfg);
   try {
-    const version = await ollamaGet('/api/version') as { version: string };
-    const list = await ollamaGet('/api/tags') as { models: { name: string }[] };
-    res.json({ connected: true, version: version.version, models: list.models.map((m) => m.name) });
+    const version = await ollamaGet(url, '/api/version') as { version: string };
+    const list = await ollamaGet(url, '/api/tags') as { models: { name: string }[] };
+    res.json({
+      connected: true,
+      version: version.version,
+      models: list.models.map((m) => m.name),
+      mode: cfg.mode,
+      resolvedUrl: url,
+    });
   } catch {
-    res.json({ connected: false, models: [] });
+    res.json({ connected: false, models: [], mode: cfg.mode, resolvedUrl: url });
   }
 });
 
-// ── model management ─────────────────────────────────────────────────────────
+// ── Model management ──────────────────────────────────────────────────────────
 
 // GET /api/ai/models
 router.get('/models', async (_req: Request, res: Response) => {
+  const url = resolveOllamaUrl(readConfig());
   try {
-    const data = await ollamaGet('/api/tags') as { models: { name: string; size: number; modified_at: string }[] };
+    const data = await ollamaGet(url, '/api/tags') as { models: { name: string; size: number; modified_at: string }[] };
     res.json(data.models ?? []);
-  } catch (err) {
+  } catch {
     res.status(502).json({ error: 'Cannot reach Ollama' });
   }
 });
 
 // POST /api/ai/models/pull  { name: "llama3.2:3b" }
-// Streams pull progress back as newline-delimited JSON
-router.post('/models/pull', async (req: Request, res: Response) => {
+// Streams pull progress as newline-delimited JSON
+router.post('/models/pull', (req: Request, res: Response) => {
   const { name } = req.body as { name: string };
   if (!name) return res.status(400).json({ error: 'name required' });
 
+  const baseUrl = resolveOllamaUrl(readConfig());
   res.setHeader('Content-Type', 'application/x-ndjson');
   res.setHeader('Transfer-Encoding', 'chunked');
 
   const payload = JSON.stringify({ name, stream: true });
-  const url = new URL('/api/pull', OLLAMA_URL);
-  const proxyReq = http.request(url, { method: 'POST',
+  const proxyReq = http.request(new URL('/api/pull', baseUrl), {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-  }, (proxyRes) => {
-    proxyRes.pipe(res);
-  });
+  }, (proxyRes) => proxyRes.pipe(res));
   proxyReq.on('error', (err) => res.end(JSON.stringify({ error: String(err) })));
   proxyReq.write(payload);
   proxyReq.end();
@@ -317,16 +334,16 @@ router.post('/models/pull', async (req: Request, res: Response) => {
 
 // DELETE /api/ai/models/:name
 router.delete('/models/:name', async (req: Request, res: Response) => {
-  const name = req.params.name;
+  const url = resolveOllamaUrl(readConfig());
   try {
-    await ollamaPost('/api/delete', { name });
+    await ollamaPost(url, '/api/delete', { name: req.params.name });
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: String(err) });
   }
 });
 
-// ── summarise ────────────────────────────────────────────────────────────────
+// ── Summarise ─────────────────────────────────────────────────────────────────
 
 // POST /api/ai/summarise  { content: string, model?: string }
 // Returns { summary: string }
@@ -334,11 +351,13 @@ router.post('/summarise', async (req: Request, res: Response) => {
   const { content, model = 'llama3.2:3b' } = req.body as { content: string; model?: string };
   if (!content?.trim()) return res.status(400).json({ error: 'content required' });
 
-  const prompt = `You are a concise assistant. Read the following note and produce a brief summary block. 
+  const url = resolveOllamaUrl(readConfig());
+  const date = new Date().toLocaleDateString('en', { year: 'numeric', month: 'long', day: 'numeric' });
+  const prompt = `You are a concise assistant. Read the following note and produce a brief summary block.
 Format your response EXACTLY as markdown like this:
 
 ---
-**AI Summary** *(${new Date().toLocaleDateString('en', { year: 'numeric', month: 'long', day: 'numeric' })})*
+**AI Summary** *(${date})*
 
 **Key points:**
 - point one
@@ -352,18 +371,17 @@ Note:
 ${content}`;
 
   try {
-    const result = await ollamaPost('/api/generate', { model, prompt, stream: false }) as { response: string };
+    const result = await ollamaPost(url, '/api/generate', { model, prompt, stream: false }) as { response: string };
     res.json({ summary: result.response.trim() });
   } catch (err) {
     res.status(502).json({ error: 'Ollama request failed: ' + String(err) });
   }
 });
 
-// ── future: extract actions ───────────────────────────────────────────────────
+// ── Future: extract actions ───────────────────────────────────────────────────
 // POST /api/ai/extract-actions  { content: string, model?: string }
 // Returns { actions: { title: string, dueHint?: string }[] }
-// Implementation: similar to /summarise but prompt asks for JSON output
-// using Ollama's format: "json" parameter for structured output.
+// Use Ollama's format: { type: "object", ... } parameter for structured JSON output.
 
 export default router;
 ```
@@ -372,15 +390,12 @@ Register in `backend/src/index.ts`:
 
 ```typescript
 import aiRouter from './routes/ai';
-// ...
 app.use('/api/ai', aiRouter);
 ```
 
 ---
 
 ### 5.3 Frontend types — `frontend/src/types/index.ts`
-
-Add to the end of the file:
 
 ```typescript
 export interface OllamaModel {
@@ -389,7 +404,13 @@ export interface OllamaModel {
   modified_at: string;
 }
 
-export interface AiStatus {
+export interface AiConfig {
+  mode: 'local' | 'docker';
+  customUrl: string | null;
+  resolvedUrl: string;
+}
+
+export interface AiStatus extends AiConfig {
   connected: boolean;
   version?: string;
   models: string[];
@@ -400,17 +421,17 @@ export interface AiStatus {
 
 ### 5.4 Frontend API — `frontend/src/api/client.ts`
 
-Add to the end of the file:
-
 ```typescript
 // ── AI / Ollama ───────────────────────────────────────────────────────────────
-export const getAiStatus = () => api.get<AiStatus>('/ai/status').then((r) => r.data);
-export const getAiModels = () => api.get<OllamaModel[]>('/ai/models').then((r) => r.data);
+export const getAiStatus   = () => api.get<AiStatus>('/ai/status').then((r) => r.data);
+export const getAiConfig   = () => api.get<AiConfig>('/ai/config').then((r) => r.data);
+export const saveAiConfig  = (cfg: Pick<AiConfig, 'mode' | 'customUrl'>) =>
+  api.put<AiConfig>('/ai/config', cfg).then((r) => r.data);
+export const getAiModels   = () => api.get<OllamaModel[]>('/ai/models').then((r) => r.data);
 export const deleteAiModel = (name: string) => api.delete(`/ai/models/${encodeURIComponent(name)}`);
 
-/** Pull a model. Returns an async generator that yields progress lines. */
 export async function* pullAiModel(name: string): AsyncGenerator<{ status: string; completed?: number; total?: number }> {
-  const response = await fetch(`/api/ai/models/pull`, {
+  const response = await fetch('/api/ai/models/pull', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -426,9 +447,7 @@ export async function* pullAiModel(name: string): AsyncGenerator<{ status: strin
     const lines = buf.split('\n');
     buf = lines.pop() ?? '';
     for (const line of lines) {
-      if (line.trim()) {
-        try { yield JSON.parse(line); } catch { /* skip */ }
-      }
+      if (line.trim()) { try { yield JSON.parse(line); } catch { /* skip */ } }
     }
   }
 }
@@ -439,52 +458,190 @@ export const summariseNote = (content: string, model?: string) =>
 
 ---
 
-### 5.5 Notes page — AI Summarise button
+### 5.5 Settings page — AI / Ollama section
 
-In `frontend/src/pages/Notes.tsx`, add a **Summarise** button to the editor toolbar (next to the mode toggle buttons). When clicked:
+Add a new **"AI / Ollama"** section to `frontend/src/pages/Settings.tsx`. It is the primary place for all Ollama management.
 
-1. Calls `summariseNote(content, selectedModel)`.
-2. Prepends the returned summary block to the note content (with a blank line separator).
-3. Triggers auto-save.
+#### 5.5.1 Ollama source selector
 
-**State to add:**
+Shown at the top of the section. Lets the user switch between modes without editing any files.
 
-```typescript
-const [summarising, setSummarising] = useState(false);
-const [aiModel, setAiModel] = useState('llama3.2:3b');
+```tsx
+// State
+const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
+const [aiChecking, setAiChecking] = useState(false);
+const [aiSaving, setAiSaving] = useState(false);
+const [customUrl, setCustomUrl] = useState('');
+
+// On mount
+useEffect(() => { loadAiStatus(); }, []);
+
+const loadAiStatus = async () => {
+  setAiChecking(true);
+  try {
+    const status = await getAiStatus();
+    setAiStatus(status);
+    setAiConfig(status);
+    setCustomUrl(status.customUrl ?? '');
+  } finally {
+    setAiChecking(false);
+  }
+};
+
+const handleModeChange = async (mode: 'local' | 'docker') => {
+  setAiSaving(true);
+  try {
+    const updated = await saveAiConfig({ mode, customUrl: aiConfig?.customUrl ?? null });
+    setAiConfig(updated);
+    await loadAiStatus(); // re-check connection with new URL
+  } finally {
+    setAiSaving(false);
+  }
+};
+
+const handleCustomUrlSave = async () => {
+  if (!aiConfig) return;
+  setAiSaving(true);
+  try {
+    const updated = await saveAiConfig({ mode: aiConfig.mode, customUrl: customUrl.trim() || null });
+    setAiConfig(updated);
+    await loadAiStatus();
+  } finally {
+    setAiSaving(false);
+  }
+};
 ```
 
-**Handler:**
+**UI layout:**
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Ollama source                                        │
+│                                                      │
+│  ● Local installation   ○ Docker container           │
+│                                                      │
+│  Active URL: http://host.docker.internal:11434       │
+│  ┌─────────────────────────────────┐ [Save]          │
+│  │ Custom URL (optional override)  │                 │
+│  └─────────────────────────────────┘                 │
+│                                                      │
+│  Status: ● Connected  Ollama 0.6.x  [Re-check]       │
+│          ○ Not connected — check Ollama is running   │
+└─────────────────────────────────────────────────────┘
+```
+
+Connection status badge:
+```tsx
+{aiChecking ? (
+  <span className="flex items-center gap-1.5 text-xs text-gray-500">
+    <Loader2 size={12} className="animate-spin" /> Checking…
+  </span>
+) : aiStatus?.connected ? (
+  <span className="flex items-center gap-1.5 text-xs text-green-600">
+    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+    Connected — Ollama {aiStatus.version}
+  </span>
+) : (
+  <span className="flex items-center gap-1.5 text-xs text-red-500">
+    <span className="w-2 h-2 rounded-full bg-red-400 inline-block" />
+    Not connected — is Ollama running?
+  </span>
+)}
+```
+
+Setup instructions shown contextually below the mode selector:
+- **Local mode:** show `brew install ollama && brew services start ollama` in a code block
+- **Docker mode:** show `docker compose up` note
+
+#### 5.5.2 Active model selector
+
+```tsx
+// localStorage key
+const MODEL_KEY = 'kaimahi_ai_model';
+
+const [activeModel, setActiveModel] = useState(() => localStorage.getItem(MODEL_KEY) ?? 'llama3.2:3b');
+
+const handleModelSelect = (name: string) => {
+  setActiveModel(name);
+  localStorage.setItem(MODEL_KEY, name);
+};
+```
+
+Dropdown of installed models (from `aiStatus.models`). Falls back to showing the stored value if Ollama is not connected.
+
+#### 5.5.3 Model management
+
+- Table of installed models: name, size (formatted as GB), modified date, Delete button
+- Pull model: text input + Pull button. Streams progress via `pullAiModel()` async generator with a progress bar
+- On pull complete: refresh model list and auto-select the new model
+
+```tsx
+// Pull progress state
+const [pullName, setPullName] = useState('');
+const [pulling, setPulling] = useState(false);
+const [pullProgress, setPullProgress] = useState<{ status: string; completed?: number; total?: number } | null>(null);
+
+const handlePull = async () => {
+  if (!pullName.trim() || pulling) return;
+  setPulling(true);
+  setPullProgress(null);
+  try {
+    for await (const progress of pullAiModel(pullName.trim())) {
+      setPullProgress(progress);
+    }
+    await loadAiStatus(); // refresh model list
+    localStorage.setItem(MODEL_KEY, pullName.trim());
+    setActiveModel(pullName.trim());
+    setPullName('');
+  } finally {
+    setPulling(false);
+    setPullProgress(null);
+  }
+};
+```
+
+---
+
+### 5.6 Notes page — Summarise button
+
+The Summarise button is **always visible** in the editor toolbar but is **disabled** when Ollama is not reachable.
 
 ```typescript
+// On mount, check AI availability
+const [aiAvailable, setAiAvailable] = useState(false);
+const [summarising, setSummarising] = useState(false);
+const [aiModel] = useState(() => localStorage.getItem('kaimahi_ai_model') ?? 'llama3.2:3b');
+
+useEffect(() => {
+  getAiStatus().then((s) => setAiAvailable(s.connected)).catch(() => setAiAvailable(false));
+}, []);
+
 const handleSummarise = async () => {
   if (!content.trim() || summarising) return;
   setSummarising(true);
   try {
     const { summary } = await summariseNote(content, aiModel);
-    setContent(summary + '\n\n' + content);
-    scheduleSave(summary + '\n\n' + content);
+    const updated = summary + '\n\n' + content;
+    setContent(updated);
+    scheduleSave(updated);
   } catch {
-    // show error toast / inline message
+    // show inline error
   } finally {
     setSummarising(false);
   }
 };
 ```
 
-**Button (in toolbar, after mode buttons):**
-
 ```tsx
 <button
   onClick={handleSummarise}
-  disabled={summarising || !content.trim()}
-  title="AI summarise"
+  disabled={summarising || !aiAvailable || !content.trim()}
+  title={!aiAvailable ? 'Ollama not connected — check Settings → AI' : 'AI summarise'}
   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
              bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-40
              disabled:cursor-not-allowed transition-colors">
-  {summarising
-    ? <Loader2 size={13} className="animate-spin" />
-    : <Sparkles size={13} />}
+  {summarising ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
   Summarise
 </button>
 ```
@@ -493,68 +650,43 @@ Import `Sparkles` from `lucide-react`.
 
 ---
 
-### 5.6 Settings page — AI section
-
-Add a new **"AI / Ollama"** section to `frontend/src/pages/Settings.tsx`. It should:
-
-1. **Status card** — on mount, call `getAiStatus()`. Show green "Connected" or red "Not connected" badge, Ollama version if available.
-2. **Model list** — table of installed models with name, size, and a Delete button. Confirm before delete.
-3. **Pull model** — text input (e.g. `llama3.2:3b`) + Pull button. Show streaming progress bar using `pullAiModel()` async generator. On completion refresh the model list.
-4. **Active model selector** — dropdown of installed models. Persist selection to `localStorage` as `kaimahi_ai_model`. Notes page reads this on mount to pre-fill `aiModel` state.
-
-**Example progress display:**
-
-```tsx
-{pullProgress && (
-  <div className="mt-2">
-    <div className="text-xs text-gray-500 mb-1">{pullProgress.status}</div>
-    {pullProgress.total && (
-      <div className="w-full bg-gray-100 rounded-full h-1.5">
-        <div className="bg-indigo-500 h-1.5 rounded-full transition-all"
-             style={{ width: `${Math.round((pullProgress.completed! / pullProgress.total) * 100)}%` }} />
-      </div>
-    )}
-  </div>
-)}
-```
-
----
-
 ## 6. Development setup
 
 ```bash
-# Option A: use docker-compose for everything (Ollama CPU-only on Mac)
-docker compose up
-
-# Option B: native Ollama for Metal GPU speed (Mac)
-brew install ollama
-brew services start ollama
+# Native Ollama (recommended for dev on Mac)
+brew install ollama && brew services start ollama
 ollama pull llama3.2:3b
-# Then run kaimahi backend with:
+
+# Backend
+cd backend
 OLLAMA_URL=http://localhost:11434 PORT=3001 npm run dev
+
+# Frontend
+cd frontend
+npm run dev
 ```
 
-For the docker-compose dev override, create `docker-compose.override.yml`:
+In dev, `http://host.docker.internal` does not resolve (no Docker). The `OLLAMA_URL` env var (`http://localhost:11434`) serves as the fallback when `ai-config.json` has `mode: "local"` and no `customUrl`. This works transparently.
 
-```yaml
-services:
-  app:
-    environment:
-      - OLLAMA_URL=http://host.docker.internal:11434  # points to native Ollama on Mac host
+To test Docker mode in dev, start the ollama container standalone:
+```bash
+docker run -d -p 11434:11434 -v ollama_data:/root/.ollama ollama/ollama
+# then set OLLAMA_URL=http://localhost:11434 in backend env — same result
 ```
 
 ---
 
 ## 7. Phase 2 — full data access (future)
 
-When extending Ollama to access all app data, the recommended pattern is **tool-augmented prompting** via the backend:
+Pattern: **tool-augmented prompting** via the backend. Ollama never accesses the DB directly — the backend assembles context and injects it into prompts.
 
-1. **Context assembly**: the backend collects relevant data (recent notes, team members, matrix entries) and injects them as context in the prompt. Ollama does not need direct DB access.
-2. **Structured output**: use Ollama's `format: <json-schema>` parameter to get machine-readable responses (e.g. a list of `{ title, assignee, dueHint }` action objects).
-3. **Orchestration route**: add `POST /api/ai/extract-actions` — takes a note's content, returns structured actions the frontend can render in a Kanban view.
-4. **Streaming chat**: add `POST /api/ai/chat` with SSE streaming for an interactive assistant that can answer questions about the team.
+| Endpoint | Input | Output | Notes |
+|---|---|---|---|
+| `POST /api/ai/extract-actions` | note content | `{ actions: { title, assignee?, dueHint? }[] }` | Uses Ollama JSON schema output |
+| `POST /api/ai/chat` | `{ messages, context? }` | SSE stream of tokens | Context = recent notes + team snapshot |
+| `POST /api/ai/team-summary` | snapshot ID | markdown summary | Reads matrix + allocations from DB |
 
-No additional infrastructure is needed for Phase 2 — the same Ollama service handles all of this.
+No additional infrastructure needed — same Ollama instance, same `/api/ai` router.
 
 ---
 
@@ -562,10 +694,11 @@ No additional infrastructure is needed for Phase 2 — the same Ollama service h
 
 | File | Change |
 |---|---|
-| `docker-compose.yml` | Add `ollama` service + `ollama_data` volume; add `OLLAMA_URL` env to app |
-| `backend/src/routes/ai.ts` | **New file** — status, model list, pull, delete, summarise |
+| `docker-compose.yml` | Add `ollama` service + `ollama_data` volume; add `OLLAMA_URL` env var |
+| `backend/src/routes/ai.ts` | **New** — config R/W, status, model CRUD, pull (streaming), summarise |
 | `backend/src/index.ts` | Register `aiRouter` at `/api/ai` |
-| `frontend/src/types/index.ts` | Add `OllamaModel`, `AiStatus` |
-| `frontend/src/api/client.ts` | Add `getAiStatus`, `getAiModels`, `deleteAiModel`, `pullAiModel`, `summariseNote` |
-| `frontend/src/pages/Notes.tsx` | Add Summarise button + handler to editor toolbar |
-| `frontend/src/pages/Settings.tsx` | Add AI/Ollama section (status, model list, pull, active model) |
+| `frontend/src/types/index.ts` | Add `OllamaModel`, `AiConfig`, `AiStatus` |
+| `frontend/src/api/client.ts` | Add `getAiStatus`, `getAiConfig`, `saveAiConfig`, `getAiModels`, `deleteAiModel`, `pullAiModel`, `summariseNote` |
+| `frontend/src/pages/Notes.tsx` | Add Summarise button (disabled when not connected) + `handleSummarise` |
+| `frontend/src/pages/Settings.tsx` | Add AI section: mode selector, connection status, model list, pull, active model |
+| `/app/data/ai-config.json` | Runtime config file (created automatically, persisted in data volume) |
