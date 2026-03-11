@@ -60,22 +60,91 @@ Docker Desktop on macOS does **not** pass Metal through to containers. The Ollam
 
 ---
 
-### Option C — Native/external Ollama
+### Option C — Native Ollama on Mac host ✅ Recommended for Mac
 
-User installs Ollama via `brew install ollama` (or the installer), runs it as a background service, and kaimahi points to `http://localhost:11434` (or `http://host.docker.internal:11434` from inside the container).
+Install Ollama directly on macOS (`brew install ollama`), run `ollama serve` as a background service, and point kaimahi at it via `http://host.docker.internal:11434`. Docker Desktop automatically resolves `host.docker.internal` to the Mac host's loopback, so the kaimahi container can reach the native Ollama process with no extra networking configuration.
 
-**When to choose this:** development only, or when the user already has Ollama running natively. Not self-contained — requires a separate install step.
+```
+  macOS host
+  ┌──────────────────────────────────────────────────────────┐
+  │                                                          │
+  │   ollama serve  ◀──────────── Metal GPU (full speed)    │
+  │   port 11434                                             │
+  │                   ▲                                      │
+  │                   │ host.docker.internal:11434            │
+  │   ┌───────────────┴──────────────────────────────────┐  │
+  │   │  docker-compose                                   │  │
+  │   │                                                   │  │
+  │   │  ┌──────────────────┐                            │  │
+  │   │  │  kaimahi (3000)  │                            │  │
+  │   │  │  Express + React │                            │  │
+  │   │  └──────────────────┘                            │  │
+  │   └───────────────────────────────────────────────────┘  │
+  └──────────────────────────────────────────────────────────┘
+            ▲ browser
+```
+
+**Why this is faster on Mac:**
+
+Docker Desktop runs containers inside a **Linux VM**. That VM has no access to Apple Metal. Any Ollama running inside Docker — whether in the kaimahi container or a separate service — is CPU-only.
+
+Native `ollama serve` runs directly on macOS and uses **Metal Performance Shaders** (MPS) via the full Apple Silicon GPU and unified memory.
+
+| Setup | llama3.2:3b typical throughput | Summarise call latency |
+|---|---|---|
+| Ollama in Docker (any option) | ~20–50 tok/s (CPU only) | ~25–50 s |
+| `ollama serve` native on Mac | ~80–150 tok/s (Metal GPU) | ~3–8 s |
+
+The difference is roughly 5–10× — significant enough to matter for interactive use.
+
+**Setup:**
+
+```bash
+brew install ollama
+brew services start ollama   # runs ollama serve on login
+ollama pull llama3.2:3b      # download default model (~2 GB)
+```
+
+Then in `docker-compose.yml`, set:
+
+```yaml
+environment:
+  - OLLAMA_URL=http://host.docker.internal:11434
+```
+
+No `ollama` service or `ollama_data` volume needed in compose.
+
+**Trade-offs vs Option B:**
+
+| | Option B (Docker service) | Option C (native Mac) |
+|---|---|---|
+| GPU on Mac | ❌ CPU only | ✅ Full Metal |
+| Self-contained | ✅ One `docker compose up` | ⚠️ Requires brew install |
+| Linux server | ✅ Works (+ Nvidia GPU) | N/A |
+| Model updates | `docker exec ollama ollama pull …` | `ollama pull …` in terminal |
+| Portability | ✅ Works anywhere Docker runs | macOS only |
 
 ---
 
-## 3. Recommended approach: Option B + configurable URL
+## 3. Recommended approach: configurable `OLLAMA_URL`
 
-Use **Option B** as the default deployment. Make the Ollama endpoint configurable via `OLLAMA_URL` so that:
-- In Docker Compose: `OLLAMA_URL=http://ollama:11434` (default — works out of the box)
-- On Mac for GPU speed: user sets `OLLAMA_URL=http://host.docker.internal:11434` and runs native Ollama for Metal acceleration
-- In dev (local Node): `OLLAMA_URL=http://localhost:11434`
+The backend uses a single `OLLAMA_URL` environment variable, defaulting to `http://localhost:11434`. This decouples kaimahi from how Ollama is deployed and lets each user choose the right option for their environment:
 
-This gives a self-contained default with a clear escape hatch for performance.
+| Environment | `OLLAMA_URL` value | Ollama setup |
+|---|---|---|
+| Mac (recommended) | `http://host.docker.internal:11434` | `brew install ollama && brew services start ollama` |
+| Linux server | `http://ollama:11434` | Option B docker-compose service |
+| Local dev (no Docker) | `http://localhost:11434` | `ollama serve` in a terminal |
+
+**For a new Mac user**, the getting-started flow becomes:
+
+```bash
+brew install ollama && brew services start ollama && ollama pull llama3.2:3b
+# edit docker-compose.yml: OLLAMA_URL=http://host.docker.internal:11434
+docker compose up
+```
+
+This gives the best performance with minimal complexity.
 
 ---
 
@@ -83,11 +152,11 @@ This gives a self-contained default with a clear escape hatch for performance.
 
 | Model | Size | Best for |
 |---|---|---|
-| `llama3.2:3b` | ~2.0 GB | General summarisation, fast on CPU |
-| `qwen2.5:7b` | ~4.7 GB | Better quality summaries, structured extraction |
-| `phi4-mini` | ~2.5 GB | Very fast on CPU, good reasoning for notes |
+| `llama3.2:3b` | ~2.0 GB | Best default — fast on both Metal and CPU |
+| `qwen2.5:7b` | ~4.7 GB | Higher quality summaries and structured extraction; comfortable on Metal, slow on CPU |
+| `phi4-mini` | ~2.5 GB | Good reasoning, efficient; reasonable on CPU if Metal unavailable |
 
-**Suggested default:** `llama3.2:3b` — good quality/speed balance, small enough that most laptops can pull it quickly. The user can swap models from the Settings UI.
+**Suggested default:** `llama3.2:3b` — good quality/speed on any setup. Users with Metal can comfortably run `qwen2.5:7b` for better output quality.
 
 ---
 
@@ -95,7 +164,9 @@ This gives a self-contained default with a clear escape hatch for performance.
 
 ### 5.1 docker-compose.yml
 
-Replace the current `docker-compose.yml`:
+Two variants depending on deployment target.
+
+**Mac (recommended — native Ollama for Metal GPU):**
 
 ```yaml
 version: '3.8'
@@ -109,23 +180,45 @@ services:
     environment:
       - DATABASE_URL=file:/app/data/practice.db
       - NODE_ENV=production
-      - OLLAMA_URL=http://ollama:11434   # <-- new
+      - OLLAMA_URL=http://host.docker.internal:11434
+```
+
+Pre-requisite: `brew install ollama && brew services start ollama && ollama pull llama3.2:3b`
+
+**Linux server (self-contained, Ollama as docker-compose service):**
+
+```yaml
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ~/practice-data:/app/data
+    environment:
+      - DATABASE_URL=file:/app/data/practice.db
+      - NODE_ENV=production
+      - OLLAMA_URL=http://ollama:11434
     depends_on:
       - ollama
 
   ollama:
     image: ollama/ollama
-    ports:
-      - "11434:11434"   # expose so user can also run `ollama` CLI locally
+    # Nvidia GPU: add the deploy.resources block below
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
     volumes:
       - ollama_data:/root/.ollama
 
 volumes:
   ollama_data:
 ```
-
-> **GPU on Linux (Nvidia):** add `deploy: resources: reservations: devices: [{driver: nvidia, count: all, capabilities: [gpu]}]` to the ollama service.  
-> **GPU on Mac:** install Ollama natively (`brew install ollama && brew services start ollama`), then change `OLLAMA_URL=http://host.docker.internal:11434` and remove the `ollama` service from compose.
 
 ---
 
