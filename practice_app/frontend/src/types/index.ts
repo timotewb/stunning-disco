@@ -111,3 +111,21 @@ export interface FolderNoteContent {
   name: string;
   content: string;
 }
+
+export interface OllamaModel {
+  name: string;
+  size: number;
+  modified_at: string;
+}
+
+export interface AiConfig {
+  mode: 'local' | 'docker';
+  customUrl: string | null;
+  resolvedUrl: string;
+}
+
+export interface AiStatus extends AiConfig {
+  connected: boolean;
+  version?: string;
+  models: string[];
+}

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown } from 'lucide-react';
-import type { Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig } from '../types';
+import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
+import type { Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig, AiStatus, OllamaModel } from '../types';
 import {
   getDimensions,
   createDimension,
@@ -18,6 +18,11 @@ import {
   getSeniorityConfigs,
   createSeniorityConfig,
   deleteSeniorityConfig,
+  getAiStatus,
+  saveAiConfig,
+  getAiModels,
+  deleteAiModel,
+  pullAiModel,
 } from '../api/client';
 import { useSnapshot } from '../context/SnapshotContext';
 
@@ -53,6 +58,19 @@ const Settings: React.FC = () => {
   const [newSeniorityName, setNewSeniorityName] = useState('');
   const [newSeniorityColor, setNewSeniorityColor] = useState('gray');
   const [deleteConfirmSeniority, setDeleteConfirmSeniority] = useState<string | null>(null);
+
+  // AI / Ollama state
+  const MODEL_KEY = 'kaimahi_ai_model';
+  const [aiStatus, setAiStatus]         = useState<AiStatus | null>(null);
+  const [aiChecking, setAiChecking]     = useState(false);
+  const [aiSaving, setAiSaving]         = useState(false);
+  const [customUrl, setCustomUrl]       = useState('');
+  const [models, setModels]             = useState<OllamaModel[]>([]);
+  const [activeModel, setActiveModel]   = useState(() => localStorage.getItem('kaimahi_ai_model') ?? 'llama3.2:3b');
+  const [pullName, setPullName]         = useState('');
+  const [pulling, setPulling]           = useState(false);
+  const [pullProgress, setPullProgress] = useState<{ status: string; completed?: number; total?: number } | null>(null);
+  const [confirmDeleteModel, setConfirmDeleteModel] = useState<string | null>(null);
 
   const AVAILABLE_COLORS = ['indigo','amber','green','blue','purple','rose','teal','orange','cyan','pink','gray'];
   const COLOR_SWATCHES: Record<string, string> = {
@@ -97,7 +115,19 @@ const Settings: React.FC = () => {
     }
   };
 
-  useEffect(() => { load(); loadSnapshots(); loadAllocTypes(); loadSeniorityConfigs(); }, []);
+  const loadAiStatus = async () => {
+    setAiChecking(true);
+    try {
+      const s = await getAiStatus();
+      setAiStatus(s);
+      setCustomUrl(s.customUrl ?? '');
+      if (s.connected) setModels(await getAiModels());
+    } finally {
+      setAiChecking(false);
+    }
+  };
+
+  useEffect(() => { load(); loadSnapshots(); loadAllocTypes(); loadSeniorityConfigs(); loadAiStatus(); }, []);
 
   const toggleDim = (id: string) => {
     setExpandedDims((prev) => {
@@ -233,6 +263,62 @@ const Settings: React.FC = () => {
     } catch {
       setError('Failed to delete seniority.');
     }
+  };
+
+  // AI / Ollama handlers
+  const handleModeChange = async (mode: 'local' | 'docker') => {
+    if (!aiStatus || aiSaving) return;
+    setAiSaving(true);
+    try {
+      await saveAiConfig({ mode, customUrl: aiStatus.customUrl });
+      await loadAiStatus();
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
+  const handleCustomUrlSave = async () => {
+    if (!aiStatus || aiSaving) return;
+    setAiSaving(true);
+    try {
+      await saveAiConfig({ mode: aiStatus.mode, customUrl: customUrl.trim() || null });
+      await loadAiStatus();
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
+  const handleSelectModel = (name: string) => {
+    setActiveModel(name);
+    localStorage.setItem(MODEL_KEY, name);
+  };
+
+  const handlePull = async () => {
+    if (!pullName.trim() || pulling) return;
+    setPulling(true);
+    setPullProgress(null);
+    try {
+      for await (const p of pullAiModel(pullName.trim())) {
+        setPullProgress(p);
+      }
+      const refreshed = await getAiModels();
+      setModels(refreshed);
+      handleSelectModel(pullName.trim());
+      setPullName('');
+    } finally {
+      setPulling(false);
+      setPullProgress(null);
+    }
+  };
+
+  const handleDeleteModel = async (name: string) => {
+    await deleteAiModel(name);
+    setModels((prev) => prev.filter((m) => m.name !== name));
+    if (activeModel === name) {
+      const next = models.find((m) => m.name !== name)?.name ?? '';
+      handleSelectModel(next);
+    }
+    setConfirmDeleteModel(null);
   };
 
   return (
@@ -622,6 +708,208 @@ const Settings: React.FC = () => {
             ))}
           </div>
         )}
+      </section>
+
+      {/* ── AI / Ollama ──────────────────────────────────────── */}
+      <section className="mt-10">
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">AI / Ollama</h3>
+
+        <div className="bg-white rounded-xl border border-gray-100 p-6">
+          {/* Source selector */}
+          <div className="mb-5">
+            <p className="text-sm font-medium text-gray-700 mb-2">Ollama source</p>
+            <div className="flex gap-4">
+              {(['local', 'docker'] as const).map((m) => (
+                <label key={m} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="ollamaMode"
+                    value={m}
+                    checked={aiStatus?.mode === m}
+                    disabled={aiSaving}
+                    onChange={() => handleModeChange(m)}
+                    className="accent-indigo-600"
+                  />
+                  <span className="text-sm text-gray-700">
+                    {m === 'local' ? 'Local installation' : 'Docker container'}
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            {/* Contextual setup instructions */}
+            {aiStatus?.mode === 'local' && (
+              <div className="mt-3 p-3 bg-gray-50 rounded-lg text-xs text-gray-600 font-mono">
+                brew install ollama &amp;&amp; brew services start ollama
+              </div>
+            )}
+            {aiStatus?.mode === 'docker' && (
+              <p className="mt-3 text-xs text-gray-500">
+                The <code>ollama</code> service in docker-compose.yml will be used.
+                Run <code className="bg-gray-100 px-1 rounded">docker compose up</code> to start it.
+              </p>
+            )}
+          </div>
+
+          {/* Resolved URL + custom override */}
+          {aiStatus && (
+            <div className="mb-5">
+              <p className="text-xs text-gray-500 mb-1">
+                Active URL: <code className="bg-gray-100 px-1 rounded">{aiStatus.resolvedUrl}</code>
+              </p>
+              <div className="flex gap-2 mt-2">
+                <input
+                  type="text"
+                  value={customUrl}
+                  onChange={(e) => setCustomUrl(e.target.value)}
+                  placeholder="Custom URL override (optional)"
+                  className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg
+                             focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+                <button
+                  onClick={handleCustomUrlSave}
+                  disabled={aiSaving}
+                  className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg
+                             hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                  Save
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Connection status */}
+          <div className="flex items-center gap-3">
+            {aiChecking ? (
+              <span className="flex items-center gap-1.5 text-xs text-gray-500">
+                <Loader2 size={12} className="animate-spin" /> Checking…
+              </span>
+            ) : aiStatus?.connected ? (
+              <span className="flex items-center gap-1.5 text-xs text-green-600">
+                <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                Connected — Ollama {aiStatus.version}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-xs text-red-500">
+                <span className="w-2 h-2 rounded-full bg-red-400 inline-block" />
+                Not connected — is Ollama running?
+              </span>
+            )}
+            <button
+              onClick={loadAiStatus}
+              disabled={aiChecking}
+              className="text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-40 transition-colors">
+              Re-check
+            </button>
+          </div>
+
+          {aiStatus?.connected && (
+            <>
+              {/* Active model selector */}
+              <div className="mt-5 pt-5 border-t border-gray-100">
+                <p className="text-sm font-medium text-gray-700 mb-2">Active model</p>
+                {models.length === 0 ? (
+                  <p className="text-xs text-gray-400">No models installed. Pull one below.</p>
+                ) : (
+                  <select
+                    value={activeModel}
+                    onChange={(e) => handleSelectModel(e.target.value)}
+                    className="w-full max-w-xs px-3 py-1.5 text-sm border border-gray-200 rounded-lg
+                               focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                    {models.map((m) => (
+                      <option key={m.name} value={m.name}>{m.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Installed models table */}
+              <div className="mt-5 pt-5 border-t border-gray-100">
+                <p className="text-sm font-medium text-gray-700 mb-3">Installed models</p>
+                {models.length === 0 ? (
+                  <p className="text-xs text-gray-400">None yet.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {models.map((m) => (
+                      <div key={m.name}
+                        className="flex items-center justify-between px-3 py-2 rounded-lg
+                                   bg-gray-50 hover:bg-gray-100 transition-colors">
+                        <div>
+                          <span className="text-sm text-gray-800">{m.name}</span>
+                          <span className="ml-2 text-xs text-gray-400">
+                            {(m.size / 1e9).toFixed(1)} GB
+                          </span>
+                        </div>
+                        {confirmDeleteModel === m.name ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-red-500">Delete?</span>
+                            <button onClick={() => handleDeleteModel(m.name)}
+                              className="text-xs text-red-600 font-medium hover:text-red-800">Yes</button>
+                            <button onClick={() => setConfirmDeleteModel(null)}
+                              className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setConfirmDeleteModel(m.name)}
+                            className="text-xs text-gray-400 hover:text-red-500 transition-colors">
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Pull model */}
+              <div className="mt-5 pt-5 border-t border-gray-100">
+                <p className="text-sm font-medium text-gray-700 mb-2">Pull a model</p>
+                <p className="text-xs text-gray-400 mb-3">
+                  Find models at{' '}
+                  <a href="https://ollama.com/library" target="_blank" rel="noreferrer"
+                    className="text-indigo-500 hover:underline">ollama.com/library</a>.
+                  Suggested: <code>llama3.2:3b</code>, <code>qwen2.5:7b</code>
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={pullName}
+                    onChange={(e) => setPullName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handlePull()}
+                    placeholder="e.g. llama3.2:3b"
+                    disabled={pulling}
+                    className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg
+                               focus:outline-none focus:ring-2 focus:ring-indigo-300
+                               disabled:opacity-50"
+                  />
+                  <button
+                    onClick={handlePull}
+                    disabled={pulling || !pullName.trim()}
+                    className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg
+                               hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-1.5">
+                    {pulling && <Loader2 size={12} className="animate-spin" />}
+                    Pull
+                  </button>
+                </div>
+                {pullProgress && (
+                  <div className="mt-2">
+                    <p className="text-xs text-gray-500 mb-1">{pullProgress.status}</p>
+                    {pullProgress.total ? (
+                      <div className="w-full bg-gray-100 rounded-full h-1.5">
+                        <div
+                          className="bg-indigo-500 h-1.5 rounded-full transition-all"
+                          style={{ width: `${Math.round(((pullProgress.completed ?? 0) / pullProgress.total) * 100)}%` }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                        <div className="h-1.5 bg-indigo-400 rounded-full animate-pulse w-1/3" />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </section>
     </div>
   );

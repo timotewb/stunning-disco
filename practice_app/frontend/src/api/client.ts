@@ -179,3 +179,41 @@ export const moveCtxFolderNote = (
     `${ctxBase(ctx, memberSlug)}/${folderSlug}/notes/${noteSlug}/move`,
     { targetFolderSlug }
   ).then((r) => r.data);
+
+// ── AI / Ollama ───────────────────────────────────────────────────────────────
+import type { AiConfig, AiStatus, OllamaModel } from '../types';
+
+export const getAiStatus  = () => api.get<AiStatus>('/ai/status').then((r) => r.data);
+export const getAiConfig  = () => api.get<AiConfig>('/ai/config').then((r) => r.data);
+export const saveAiConfig = (cfg: Pick<AiConfig, 'mode' | 'customUrl'>) =>
+  api.put<AiConfig>('/ai/config', cfg).then((r) => r.data);
+export const getAiModels  = () => api.get<OllamaModel[]>('/ai/models').then((r) => r.data);
+export const deleteAiModel = (name: string) =>
+  api.delete(`/ai/models/${encodeURIComponent(name)}`);
+
+export async function* pullAiModel(
+  name: string,
+): AsyncGenerator<{ status: string; completed?: number; total?: number }> {
+  const response = await fetch('/api/ai/models/pull', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.trim()) { try { yield JSON.parse(line); } catch { /* skip */ } }
+    }
+  }
+}
+
+export const summariseNote = (content: string, model?: string) =>
+  api.post<{ summary: string }>('/ai/summarise', { content, model }).then((r) => r.data);

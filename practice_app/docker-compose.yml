@@ -9,3 +9,24 @@ services:
     environment:
       - DATABASE_URL=file:/app/data/practice.db
       - NODE_ENV=production
+      # Default targets the docker service.
+      # Override to http://host.docker.internal:11434 for native Ollama on Mac.
+      - OLLAMA_URL=http://ollama:11434
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama
+    # Nvidia GPU on Linux — uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  ollama_data:

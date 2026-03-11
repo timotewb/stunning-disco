@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import {
   Search, Eye, Edit3, Columns, Check, Loader2, NotebookPen, FileText,
   CalendarDays, User, FolderOpen, Folder as FolderIcon, Plus, MoreHorizontal,
-  ChevronDown, ChevronRight, Trash2, Pencil, MoveRight, X,
+  ChevronDown, ChevronRight, Trash2, Pencil, MoveRight, X, Sparkles,
 } from 'lucide-react';
 import {
   getNotes, getNote, saveNote, searchNotes,
@@ -16,6 +16,7 @@ import {
   getCtxFolders, createCtxFolder, renameCtxFolder, deleteCtxFolder,
   createCtxFolderNote, getCtxFolderNote, saveCtxFolderNote,
   renameCtxFolderNote, deleteCtxFolderNote, moveCtxFolderNote,
+  getAiStatus, summariseNote,
 } from '../api/client';
 import type { NoteListItem, NoteSearchResult, TeamMember, Folder } from '../types';
 
@@ -281,6 +282,11 @@ const Notes: React.FC = () => {
   const [modalMoveTarget, setModalMoveTarget] = useState('');
   const [modalLoading, setModalLoading] = useState(false);
 
+  // ── AI state ──────────────────────────────────────────────────────────────
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [summarising, setSummarising] = useState(false);
+  const [aiModel] = useState(() => localStorage.getItem('kaimahi_ai_model') ?? 'llama3.2:3b');
+
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -295,6 +301,13 @@ const Notes: React.FC = () => {
       setMembers(sorted);
       setSelectedMember(sorted[0] ?? null);
     });
+  }, []);
+
+  // ── AI availability ───────────────────────────────────────────────────────
+  useEffect(() => {
+    getAiStatus()
+      .then((s) => setAiAvailable(s.connected))
+      .catch(() => setAiAvailable(false));
   }, []);
 
   // ── Context folders helpers ───────────────────────────────────────────────
@@ -431,6 +444,24 @@ const Notes: React.FC = () => {
     if (isFolders) setFolderContent(val);
     else setContent(val);
     scheduleSave(val);
+  };
+
+  // ── AI summarise ──────────────────────────────────────────────────────────
+
+  const handleSummarise = async () => {
+    if (!activeContent.trim() || summarising) return;
+    setSummarising(true);
+    try {
+      const { summary } = await summariseNote(activeContent, aiModel);
+      const updated = summary + '\n\n' + activeContent;
+      if (isFolders) setFolderContent(updated);
+      else setContent(updated);
+      scheduleSave(updated);
+    } catch {
+      // silently ignore — Ollama may have become unavailable
+    } finally {
+      setSummarising(false);
+    }
   };
 
   // ── Search ────────────────────────────────────────────────────────────────
@@ -840,6 +871,24 @@ const Notes: React.FC = () => {
                       </button>
                     ))}
                   </div>
+                  <button
+                    onClick={handleSummarise}
+                    disabled={summarising || !aiAvailable || !activeContent.trim()}
+                    title={
+                      !aiAvailable
+                        ? 'Ollama not connected — configure in Settings → AI'
+                        : summarising
+                        ? 'Summarising…'
+                        : 'AI summarise note'
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
+                               bg-indigo-50 text-indigo-700 hover:bg-indigo-100
+                               disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    {summarising
+                      ? <Loader2 size={13} className="animate-spin" />
+                      : <Sparkles size={13} />}
+                    Summarise
+                  </button>
                 </div>
               </div>
 

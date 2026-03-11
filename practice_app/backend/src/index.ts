@@ -12,6 +12,7 @@ import seniorityConfigRouter from './routes/seniorityConfig';
 import smeRouter from './routes/sme';
 import notesRouter from './routes/notes';
 import exportRouter from './routes/export';
+import aiRouter from './routes/ai';
 
 if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = 'file:/app/data/practice.db';
@@ -35,6 +36,7 @@ app.use('/api/seniority-config', seniorityConfigRouter);
 app.use('/api/sme', smeRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/export', exportRouter);
+app.use('/api/ai', aiRouter);
 
 if (process.env.NODE_ENV === 'production') {
   const frontendDist = path.join(__dirname, '../frontend/dist');
