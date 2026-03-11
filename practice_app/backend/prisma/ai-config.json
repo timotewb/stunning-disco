@@ -1,4 +1,4 @@
 {
-  "mode": "docker",
-  "customUrl": null
+  "mode": "local",
+  "customUrl": "http://localhost:11434"
 }

@@ -33,11 +33,20 @@ function writeConfig(cfg: AiConfig): void {
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
 }
 
+// When running inside Docker, localhost refers to the container itself, not the host.
+// Detect Docker by checking for /.dockerenv and rewrite localhost → host.docker.internal.
+const isDocker = fs.existsSync('/.dockerenv');
+
+function hostify(url: string): string {
+  if (isDocker) return url.replace(/\/\/localhost(:|\/|$)/, '//host.docker.internal$1');
+  return url;
+}
+
 function resolveOllamaUrl(cfg: AiConfig): string {
-  if (cfg.customUrl) return cfg.customUrl;
+  if (cfg.customUrl) return hostify(cfg.customUrl);
   if (cfg.mode === 'local') return 'http://host.docker.internal:11434';
   if (cfg.mode === 'docker') return 'http://ollama:11434';
-  return process.env.OLLAMA_URL ?? 'http://localhost:11434';
+  return hostify(process.env.OLLAMA_URL ?? 'http://localhost:11434');
 }
 
 // ── Prompt persistence ────────────────────────────────────────────────────────
