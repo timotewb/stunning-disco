@@ -52,11 +52,12 @@ function typeColors(allocationTypes: AllocationTypeConfig[]): Record<string, { b
   return map;
 }
 
-function getQuarterRange() {
+function getDefaultRange() {
   const now = new Date();
-  const q = Math.floor(now.getMonth() / 3);
-  const start = new Date(now.getFullYear(), q * 3, 1);
-  const end = new Date(now.getFullYear(), q * 3 + 3, 0);
+  const start = new Date(now);
+  start.setDate(start.getDate() - 7);
+  const end = new Date(now);
+  end.setDate(end.getDate() + 14);
   return { start, end };
 }
 
@@ -78,8 +79,8 @@ const Timeline: React.FC = () => {
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [allocationTypes, setAllocationTypes] = useState<AllocationTypeConfig[]>([]);
   const [loading, setLoading] = useState(true);
-  const [rangeStart, setRangeStart] = useState(() => toDateInput(getQuarterRange().start));
-  const [rangeEnd, setRangeEnd] = useState(() => toDateInput(getQuarterRange().end));
+  const [rangeStart, setRangeStart] = useState(() => toDateInput(getDefaultRange().start));
+  const [rangeEnd, setRangeEnd] = useState(() => toDateInput(getDefaultRange().end));
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...emptyForm });
@@ -104,6 +105,11 @@ const Timeline: React.FC = () => {
   const start = new Date(rangeStart);
   const end = new Date(rangeEnd);
   const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000));
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayVisible = today >= start && today <= end;
+  const todayLeft = ((today.getTime() - start.getTime()) / (totalDays * 86400000)) * 100;
 
   const visibleAllocations = allocations.filter((a) => {
     const as = new Date(a.startDate);
@@ -255,6 +261,13 @@ const Timeline: React.FC = () => {
                   {m.label}
                 </span>
               ))}
+              {todayVisible && (
+                <div
+                  className="absolute top-0 bottom-0 w-px bg-red-400"
+                  style={{ left: `${todayLeft}%` }}
+                  title="Today"
+                />
+              )}
             </div>
           </div>
 
@@ -274,6 +287,12 @@ const Timeline: React.FC = () => {
                       <span className="truncate">{member.name}</span>
                     </div>
                     <div className="flex-1 relative" style={{ minHeight: rowHeight }}>
+                      {todayVisible && (
+                        <div
+                          className="absolute top-0 bottom-0 w-px bg-red-400 opacity-30 pointer-events-none z-10"
+                          style={{ left: `${todayLeft}%` }}
+                        />
+                      )}
                       {laned.map(({ alloc: a, lane }) => {
                         const s = new Date(a.startDate);
                         const e = new Date(a.endDate);
