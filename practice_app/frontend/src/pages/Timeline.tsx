@@ -86,6 +86,7 @@ const Timeline: React.FC = () => {
   const [form, setForm] = useState({ ...emptyForm });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [toast, setToast] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
@@ -170,7 +171,10 @@ const Timeline: React.FC = () => {
     try {
       await deleteAllocation(id);
       setDeleteConfirm(null);
+      setShowModal(false);
       load();
+      setToast('Allocation deleted');
+      setTimeout(() => setToast(null), 3000);
     } catch {
       setError('Failed to delete allocation.');
     }
@@ -223,6 +227,13 @@ const Timeline: React.FC = () => {
       {error && (
         <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm flex items-center justify-between">
           {error} <button onClick={() => setError('')}><X size={14} /></button>
+        </div>
+      )}
+
+      {toast && (
+        <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm flex items-center justify-between">
+          <span className="flex items-center gap-2"><Check size={14} /> {toast}</span>
+          <button onClick={() => setToast(null)}><X size={14} /></button>
         </div>
       )}
 
