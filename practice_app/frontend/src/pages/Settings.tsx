@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown, Loader2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown, Loader2, ToggleLeft, ToggleRight, Layers, CalendarDays, Inbox, Sparkles, Database } from 'lucide-react';
 import type {
   Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig, AiStatus, OllamaModel, AiPrompts,
   RequestSourceConfig, RequestTypeConfig, RequestPriorityConfig, RequestStatusConfig, RequestEffortConfig,
@@ -47,6 +47,8 @@ import {
   deleteRequestEffortConfig,
   getScannerConfig,
   saveScannerConfig,
+  exportData,
+  importData,
 } from '../api/client';
 import { useSnapshot } from '../context/SnapshotContext';
 
@@ -108,6 +110,63 @@ const Settings: React.FC = () => {
   const [scannerSaving, setScannerSaving] = useState(false);
   const [scannerSaved, setScannerSaved] = useState(false);
   const [newFolderInput, setNewFolderInput] = useState('');
+
+  // Active settings section
+  const [activeSection, setActiveSection] = useState('dimensions');
+
+  // Data migration state
+  const [exportBusy, setExportBusy] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<{ version: string; exportedAt: string; counts: Record<string, number> } | null>(null);
+  const [importPayload, setImportPayload] = useState<object | null>(null);
+  const [importConfirm, setImportConfirm] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importResult, setImportResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    setImportFile(file);
+    setImportPreview(null);
+    setImportPayload(null);
+    setImportResult(null);
+    setImportConfirm(false);
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target?.result as string);
+        if (parsed.app !== 'kaimahi' || !parsed.data) {
+          setImportPreview(null);
+          setImportResult({ ok: false, msg: 'This file was not created by kaimahi — cannot import.' });
+          return;
+        }
+        setImportPreview({ version: parsed.version, exportedAt: parsed.exportedAt, counts: parsed.counts ?? {} });
+        setImportPayload(parsed);
+      } catch {
+        setImportResult({ ok: false, msg: 'Could not parse file — make sure it is a valid kaimahi export.' });
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImport = async () => {
+    if (!importPayload) return;
+    setImportBusy(true);
+    setImportResult(null);
+    try {
+      await importData(importPayload);
+      setImportResult({ ok: true, msg: 'Import successful! Reload the page to see your restored data.' });
+      setImportFile(null);
+      setImportPreview(null);
+      setImportPayload(null);
+      setImportConfirm(false);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? String(err);
+      setImportResult({ ok: false, msg });
+    } finally {
+      setImportBusy(false);
+    }
+  };
 
   // Request taxonomy config state
   const [reqSources, setReqSources] = useState<RequestSourceConfig[]>([]);
@@ -445,9 +504,51 @@ const Settings: React.FC = () => {
     }
   };
 
+  const NAV_GROUPS = [
+    { group: 'Capabilities', icon: Layers,       items: [{ id: 'dimensions',          label: 'Dimensions'          }] },
+    { group: 'Timeline',     icon: CalendarDays,  items: [{ id: 'allocation-types',    label: 'Allocation Types'    },
+                                                           { id: 'seniority',           label: 'Seniority Levels'    }] },
+    { group: 'Work Requests',icon: Inbox,         items: [{ id: 'request-taxonomies',  label: 'Request Taxonomies'  },
+                                                           { id: 'scanner',             label: 'Notes Scanner'       }] },
+    { group: 'AI',           icon: Sparkles,      items: [{ id: 'ai-config',           label: 'AI / Ollama'         },
+                                                           { id: 'ai-prompts',          label: 'AI Prompts'          }] },
+    { group: 'System',       icon: Database,      items: [{ id: 'snapshots',           label: 'Snapshots'           },
+                                                           { id: 'migration',           label: 'Data Migration'      }] },
+  ] as const;
+
   return (
-    <div className="p-8">
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">Settings</h2>
+    <div className="flex h-full overflow-hidden">
+
+      {/* ── Left nav sidebar ──────────────────────────────────── */}
+      <nav className="w-52 flex-shrink-0 border-r border-gray-200 bg-gray-50 overflow-y-auto">
+        <div className="px-4 py-6">
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 px-3 mb-5">Settings</p>
+          {NAV_GROUPS.map(({ group, icon: Icon, items }) => (
+            <div key={group} className="mb-5">
+              <div className="flex items-center gap-1.5 px-3 mb-1">
+                <Icon size={11} className="text-gray-400" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">{group}</span>
+              </div>
+              {items.map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => setActiveSection(id)}
+                  className={`w-full text-left px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                    activeSection === id
+                      ? 'bg-indigo-50 text-indigo-700 font-medium'
+                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </nav>
+
+      {/* ── Content pane ──────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto p-8">
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm flex items-center justify-between">
@@ -455,6 +556,7 @@ const Settings: React.FC = () => {
         </div>
       )}
 
+      {activeSection === 'dimensions' && (
       <section>
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Dimensions</h3>
 
@@ -578,9 +680,10 @@ const Settings: React.FC = () => {
           </div>
         )}
       </section>
+      )}
 
-      {/* Snapshot Management */}
-      <section className="mt-10">
+      {activeSection === 'snapshots' && (
+      <section>
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Snapshots</h3>
 
         {/* Confirmation dialog */}
@@ -695,9 +798,10 @@ const Settings: React.FC = () => {
           </div>
         )}
       </section>
+      )}
 
-      {/* Allocation Types */}
-      <section className="mt-10">
+      {activeSection === 'allocation-types' && (
+      <section>
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Allocation Types</h3>
         <p className="text-sm text-gray-500 mb-4">
           Define the types available when creating allocations on the Timeline. Removing a type that is already in use will display those allocations as <span className="font-medium text-gray-700">uncategorised</span>.
@@ -764,9 +868,10 @@ const Settings: React.FC = () => {
           </div>
         )}
       </section>
+      )}
 
-      {/* Seniority Types */}
-      <section className="mt-10">
+      {activeSection === 'seniority' && (
+      <section>
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Seniority Levels</h3>
         <p className="text-sm text-gray-500 mb-4">
           Define the seniority levels available when adding or editing team members. Removing a level that is already assigned will display those members with a <span className="font-medium text-gray-700">gray</span> badge.
@@ -833,9 +938,10 @@ const Settings: React.FC = () => {
           </div>
         )}
       </section>
+      )}
 
-      {/* ── AI / Ollama ──────────────────────────────────────── */}
-      <section className="mt-10">
+      {activeSection === 'ai-config' && (
+      <section>
         <h3 className="text-lg font-semibold text-gray-800 mb-4">AI / Ollama</h3>
 
         <div className="bg-white rounded-xl border border-gray-100 p-6">
@@ -1035,9 +1141,10 @@ const Settings: React.FC = () => {
           )}
         </div>
       </section>
+      )}
 
-      {/* ── AI Prompts ───────────────────────────────────────── */}
-      <section className="mt-10">
+      {activeSection === 'ai-prompts' && (
+      <section>
         <h3 className="text-lg font-semibold text-gray-800 mb-1">AI Prompts</h3>
         <p className="text-sm text-gray-500 mb-4">
           Customise the system prompts sent to Ollama for each AI feature.
@@ -1154,9 +1261,10 @@ const Settings: React.FC = () => {
           </div>
         )}
       </section>
+      )}
 
-      {/* ── Notes Scanner ─────────────────────────────────────────────────── */}
-      <section className="mt-10">
+      {activeSection === 'scanner' && (
+      <section>
         <h2 className="text-base font-semibold text-gray-900 mb-1">Notes Scanner</h2>
         <p className="text-sm text-gray-500 mb-4">Configure how the AI scans your notes for work requests.</p>
 
@@ -1267,9 +1375,10 @@ const Settings: React.FC = () => {
           </div>
         )}
       </section>
+      )}
 
-      {/* ── Request Taxonomies ────────────────────────────────── */}
-      <section className="mt-10">
+      {activeSection === 'request-taxonomies' && (
+      <section>
         <h3 className="text-lg font-semibold text-gray-800 mb-1">Request Taxonomies</h3>
         <p className="text-sm text-gray-500 mb-6">
           Configure the drop-down values used in the Demand Ledger. All taxonomies are fully customisable.
@@ -1386,6 +1495,120 @@ const Settings: React.FC = () => {
           </div>
         </div>
       </section>
+      )}
+
+      {activeSection === 'migration' && (
+      <section>
+        <h3 className="text-lg font-semibold text-gray-800 mb-1">Data Migration</h3>
+        <p className="text-sm text-gray-500 mb-6">
+          Export all your data to a portable JSON file, then import it on another machine.
+          Use this when changing laptops or as a manual backup.
+        </p>
+
+        {/* Export card */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-5">
+          <h4 className="font-semibold text-gray-800 mb-1">Export data</h4>
+          <p className="text-sm text-gray-500 mb-4">
+            Downloads a <code className="bg-gray-100 px-1 rounded text-xs">.json</code> file containing
+            your entire database (team, capabilities, matrices, snapshots, work requests, contacts,
+            configuration) <span className="font-medium text-gray-700">plus all your notes</span>{' '}
+            (daily notes, member notes, and folder notes).
+          </p>
+          <button
+            onClick={async () => {
+              setExportBusy(true);
+              try { await exportData(); } finally { setExportBusy(false); }
+            }}
+            disabled={exportBusy}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {exportBusy ? <Loader2 size={15} className="animate-spin" /> : <Database size={15} />}
+            {exportBusy ? 'Preparing export…' : 'Export all data'}
+          </button>
+        </div>
+
+        {/* Import card */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h4 className="font-semibold text-gray-800 mb-1">Import data</h4>
+          <p className="text-sm text-gray-500 mb-4">
+            Select a previously exported <code className="bg-gray-100 px-1 rounded text-xs">kaimahi-export-*.json</code> file.
+            <span className="font-semibold text-red-600"> All existing data will be permanently replaced.</span>
+          </p>
+
+          {/* File picker */}
+          <label className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors">
+            <Plus size={14} />
+            {importFile ? importFile.name : 'Choose export file…'}
+            <input type="file" accept=".json" className="hidden" onChange={handleImportFileChange} />
+          </label>
+
+          {/* Preview */}
+          {importPreview && (
+            <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm">
+              <p className="font-medium text-gray-700 mb-2">
+                Export from {new Date(importPreview.exportedAt).toLocaleString()} · v{importPreview.version}
+              </p>
+              <div className="grid grid-cols-3 gap-x-6 gap-y-1 text-gray-600">
+                {Object.entries(importPreview.counts).map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-2">
+                    <span className="capitalize">{k.replace(/([A-Z])/g, ' $1').trim()}</span>
+                    <span className="font-medium text-gray-800">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Confirm checkbox */}
+          {importPreview && (
+            <label className="flex items-start gap-2 mt-4 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={importConfirm}
+                onChange={(e) => setImportConfirm(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-sm text-red-600 font-medium">
+                I understand that all current data will be permanently deleted and replaced with the imported data.
+              </span>
+            </label>
+          )}
+
+          {/* Import button */}
+          {importPreview && (
+            <button
+              onClick={handleImport}
+              disabled={!importConfirm || importBusy}
+              className="mt-4 flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {importBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+              {importBusy ? 'Importing…' : 'Import and replace all data'}
+            </button>
+          )}
+
+          {/* Result */}
+          {importResult && (
+            <div className={`mt-4 p-3 rounded-lg text-sm font-medium ${
+              importResult.ok
+                ? 'bg-green-50 text-green-700 border border-green-200'
+                : 'bg-red-50 text-red-600 border border-red-200'
+            }`}>
+              {importResult.msg}
+              {importResult.ok && (
+                <button
+                  onClick={() => window.location.reload()}
+                  className="ml-3 underline"
+                >
+                  Reload now
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+      )}
+
+      </div>
     </div>
   );
 };

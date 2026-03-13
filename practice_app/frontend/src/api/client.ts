@@ -327,3 +327,19 @@ export const saveAiPrompts = (prompts: Partial<AiPrompts>) =>
   api.put<AiPrompts>('/ai/prompts', prompts).then((r) => r.data);
 export const resetAiPrompt = (key: keyof AiPrompts) =>
   api.delete<AiPrompts>(`/ai/prompts/${key}`).then((r) => r.data);
+
+// ── Data Migration ────────────────────────────────────────────────────────────
+export const exportData = async (): Promise<void> => {
+  const res = await api.get('/data-migration/export', { responseType: 'blob' });
+  const url = URL.createObjectURL(new Blob([res.data], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `kaimahi-export-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+export const importData = (payload: object) =>
+  api.post<{ success: boolean }>('/data-migration/import', payload).then((r) => r.data);

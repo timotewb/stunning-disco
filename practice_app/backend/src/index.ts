@@ -14,6 +14,7 @@ import exportRouter from './routes/export';
 import aiRouter from './routes/ai';
 import requestsRouter from './routes/requests';
 import contactsRouter from './routes/contacts';
+import dataMigrationRouter from './routes/dataMigration';
 import {
   requestSourceConfigRouter,
   requestTypeConfigRouter,
@@ -54,6 +55,7 @@ app.use('/api/export', exportRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/requests', requestsRouter);
 app.use('/api/contacts', contactsRouter);
+app.use('/api/data-migration', dataMigrationRouter);
 app.use('/api/request-source-config', requestSourceConfigRouter);
 app.use('/api/request-type-config', requestTypeConfigRouter);
 app.use('/api/request-priority-config', requestPriorityConfigRouter);
