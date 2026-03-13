@@ -1,21 +1,22 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Plus, Pencil, Trash2, X, Check, Download, AlertTriangle } from 'lucide-react';
-import type { Allocation, TeamMember, AllocationTypeConfig } from '../types';
-import { getAllocations, getTeam, createAllocation, updateAllocation, deleteAllocation, getAllocationTypes } from '../api/client';
+import type { WorkRequest, TeamMember, AllocationTypeConfig } from '../types';
+import { getWorkRequests, getTeam, createWorkRequest, updateWorkRequest, deleteWorkRequest, getAllocationTypes } from '../api/client';
 
 const LANE_H = 30; // px per lane slot (bar height + gap)
 const V_PAD = 4;   // vertical padding inside the track area
 
-/** Assigns each allocation to the lowest available lane so overlapping bars stack vertically. */
-function assignLanes(allocs: Allocation[]): { alloc: Allocation; lane: number }[] {
-  const sorted = [...allocs].sort(
-    (a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+/** Assigns each work request to the lowest available lane so overlapping bars stack vertically. */
+function assignLanes(items: WorkRequest[]): { item: WorkRequest; lane: number }[] {
+  const sorted = [...items].sort(
+    (a, b) =>
+      new Date(a.allocationStartDate!).getTime() - new Date(b.allocationStartDate!).getTime()
   );
   const laneEnds: Date[] = [];
-  const result: { alloc: Allocation; lane: number }[] = [];
-  for (const alloc of sorted) {
-    const s = new Date(alloc.startDate);
-    const e = new Date(alloc.endDate);
+  const result: { item: WorkRequest; lane: number }[] = [];
+  for (const item of sorted) {
+    const s = new Date(item.allocationStartDate!);
+    const e = new Date(item.allocationEndDate!);
     let idx = laneEnds.findIndex((end) => s >= end);
     if (idx === -1) {
       idx = laneEnds.length;
@@ -23,7 +24,7 @@ function assignLanes(allocs: Allocation[]): { alloc: Allocation; lane: number }[
     } else {
       laneEnds[idx] = e;
     }
-    result.push({ alloc, lane: idx });
+    result.push({ item, lane: idx });
   }
   return result;
 }
@@ -66,16 +67,16 @@ function toDateInput(d: Date) {
 }
 
 const emptyForm = {
-  teamMemberId: '',
-  projectName: '',
-  type: 'project',
-  startDate: '',
-  endDate: '',
-  notes: '',
+  assigneeId: '',
+  title: '',
+  allocationType: 'project',
+  allocationStartDate: '',
+  allocationEndDate: '',
+  allocationNotes: '',
 };
 
 const Timeline: React.FC = () => {
-  const [allocations, setAllocations] = useState<Allocation[]>([]);
+  const [workRequests, setWorkRequests] = useState<WorkRequest[]>([]);
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [allocationTypes, setAllocationTypes] = useState<AllocationTypeConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,8 +93,12 @@ const Timeline: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [a, t, at] = await Promise.all([getAllocations(), getTeam(), getAllocationTypes()]);
-      setAllocations(a);
+      const [wr, t, at] = await Promise.all([
+        getWorkRequests({ isAllocated: true }),
+        getTeam(),
+        getAllocationTypes(),
+      ]);
+      setWorkRequests(wr);
       setTeam(t);
       setAllocationTypes(at);
     } finally {
@@ -112,10 +117,11 @@ const Timeline: React.FC = () => {
   const todayVisible = today >= start && today <= end;
   const todayLeft = ((today.getTime() - start.getTime()) / (totalDays * 86400000)) * 100;
 
-  const visibleAllocations = allocations.filter((a) => {
-    const as = new Date(a.startDate);
-    const ae = new Date(a.endDate);
-    return as <= end && ae >= start;
+  const visibleRequests = workRequests.filter((r) => {
+    if (!r.allocationStartDate || !r.allocationEndDate) return false;
+    const rs = new Date(r.allocationStartDate);
+    const re = new Date(r.allocationEndDate);
+    return rs <= end && re >= start;
   });
 
   const clamp = (d: Date) => {
@@ -134,31 +140,46 @@ const Timeline: React.FC = () => {
 
   const openAdd = () => {
     const defaultType = allocationTypes[0]?.name ?? 'project';
-    setForm({ ...emptyForm, teamMemberId: team[0]?.id ?? '', type: defaultType, startDate: rangeStart, endDate: rangeEnd });
+    setForm({
+      ...emptyForm,
+      assigneeId: team[0]?.id ?? '',
+      allocationType: defaultType,
+      allocationStartDate: rangeStart,
+      allocationEndDate: rangeEnd,
+    });
     setEditingId(null);
     setShowModal(true);
   };
 
-  const openEdit = (a: Allocation) => {
+  const openEdit = (r: WorkRequest) => {
     setForm({
-      teamMemberId: a.teamMemberId,
-      projectName: a.projectName,
-      type: a.type,
-      startDate: toDateInput(new Date(a.startDate)),
-      endDate: toDateInput(new Date(a.endDate)),
-      notes: a.notes,
+      assigneeId: r.assigneeId ?? '',
+      title: r.title,
+      allocationType: r.allocationType ?? allocationTypes[0]?.name ?? 'project',
+      allocationStartDate: r.allocationStartDate ? toDateInput(new Date(r.allocationStartDate)) : '',
+      allocationEndDate: r.allocationEndDate ? toDateInput(new Date(r.allocationEndDate)) : '',
+      allocationNotes: r.allocationNotes ?? '',
     });
-    setEditingId(a.id);
+    setEditingId(r.id);
     setShowModal(true);
   };
 
   const handleSubmit = async () => {
-    if (!form.projectName.trim() || !form.teamMemberId) return;
+    if (!form.title.trim() || !form.assigneeId) return;
     try {
       if (editingId) {
-        await updateAllocation(editingId, form);
+        await updateWorkRequest(editingId, {
+          ...form,
+          isAllocated: true,
+        });
       } else {
-        await createAllocation(form);
+        await createWorkRequest({
+          ...form,
+          isAllocated: true,
+          source: 'planning',
+          type: 'other',
+          status: 'in-flight',
+        });
       }
       setShowModal(false);
       load();
@@ -169,7 +190,7 @@ const Timeline: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     try {
-      await deleteAllocation(id);
+      await deleteWorkRequest(id);
       setDeleteConfirm(null);
       setShowModal(false);
       load();
@@ -287,8 +308,8 @@ const Timeline: React.FC = () => {
             {(() => {
               const colors = typeColors(allocationTypes);
               return team.map((member) => {
-                const memberAllocs = visibleAllocations.filter((a) => a.teamMemberId === member.id);
-                const laned = assignLanes(memberAllocs);
+                const memberItems = visibleRequests.filter((r) => r.assigneeId === member.id);
+                const laned = assignLanes(memberItems);
                 const numLanes = Math.max(1, ...laned.map(({ lane }) => lane + 1));
                 const rowHeight = V_PAD * 2 + numLanes * LANE_H;
                 return (
@@ -304,23 +325,23 @@ const Timeline: React.FC = () => {
                           style={{ left: `${todayLeft}%` }}
                         />
                       )}
-                      {laned.map(({ alloc: a, lane }) => {
-                        const s = new Date(a.startDate);
-                        const e = new Date(a.endDate);
+                      {laned.map(({ item: r, lane }) => {
+                        const s = new Date(r.allocationStartDate!);
+                        const e = new Date(r.allocationEndDate!);
                         const left = leftPct(s);
                         const width = widthPct(s, e);
-                        const displayType = colors[a.type] ? a.type : 'uncategorised';
+                        const displayType = r.allocationType && colors[r.allocationType] ? r.allocationType : 'uncategorised';
                         const barTop = V_PAD + lane * LANE_H;
                         const barHeight = LANE_H - 4;
                         return (
                           <div
-                            key={a.id}
+                            key={r.id}
                             className={`absolute rounded-md flex items-center px-2 text-xs text-white cursor-pointer ${colors[displayType].bar}`}
                             style={{ left: `${left}%`, width: `${width}%`, top: barTop, height: barHeight }}
-                            onClick={() => openEdit(a)}
-                            title={`${a.projectName} (${displayType})`}
+                            onClick={() => openEdit(r)}
+                            title={`${r.title} (${displayType})`}
                           >
-                            <span className="truncate">{a.projectName}</span>
+                            <span className="truncate">{r.title}</span>
                           </div>
                         );
                       })}
@@ -341,8 +362,8 @@ const Timeline: React.FC = () => {
             <div className="space-y-4">
               <Field label="Team Member">
                 <select
-                  value={form.teamMemberId}
-                  onChange={(e) => setForm((f) => ({ ...f, teamMemberId: e.target.value }))}
+                  value={form.assigneeId}
+                  onChange={(e) => setForm((f) => ({ ...f, assigneeId: e.target.value }))}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 >
                   {team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -351,15 +372,15 @@ const Timeline: React.FC = () => {
               <Field label="Project / Activity Name">
                 <input
                   type="text"
-                  value={form.projectName}
-                  onChange={(e) => setForm((f) => ({ ...f, projectName: e.target.value }))}
+                  value={form.title}
+                  onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 />
               </Field>
               <Field label="Type">
                 <select
-                  value={form.type}
-                  onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
+                  value={form.allocationType}
+                  onChange={(e) => setForm((f) => ({ ...f, allocationType: e.target.value }))}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 >
                   {allocationTypes.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
@@ -369,24 +390,24 @@ const Timeline: React.FC = () => {
                 <Field label="Start Date">
                   <input
                     type="date"
-                    value={form.startDate}
-                    onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+                    value={form.allocationStartDate}
+                    onChange={(e) => setForm((f) => ({ ...f, allocationStartDate: e.target.value }))}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                   />
                 </Field>
                 <Field label="End Date">
                   <input
                     type="date"
-                    value={form.endDate}
-                    onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+                    value={form.allocationEndDate}
+                    onChange={(e) => setForm((f) => ({ ...f, allocationEndDate: e.target.value }))}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                   />
                 </Field>
               </div>
               <Field label="Notes">
                 <textarea
-                  value={form.notes}
-                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  value={form.allocationNotes}
+                  onChange={(e) => setForm((f) => ({ ...f, allocationNotes: e.target.value }))}
                   rows={2}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 />
@@ -409,7 +430,7 @@ const Timeline: React.FC = () => {
                 <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
                 <button
                   onClick={handleSubmit}
-                  disabled={!form.projectName.trim()}
+                  disabled={!form.title.trim()}
                   className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
                 >
                   {editingId ? 'Save' : 'Add'}

@@ -13,10 +13,16 @@ import smeRouter from './routes/sme';
 import notesRouter from './routes/notes';
 import exportRouter from './routes/export';
 import aiRouter from './routes/ai';
+import requestsRouter from './routes/requests';
 
 if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = 'file:/app/data/practice.db';
 }
+
+// Run the allocation migration on startup (idempotent — safe every boot).
+import('./scripts/migrate-allocations').catch((e) =>
+  console.error('[startup] migrate-allocations failed:', e)
+);
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -37,6 +43,7 @@ app.use('/api/sme', smeRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/export', exportRouter);
 app.use('/api/ai', aiRouter);
+app.use('/api/requests', requestsRouter);
 
 if (process.env.NODE_ENV === 'production') {
   const frontendDist = path.join(__dirname, '../frontend/dist');

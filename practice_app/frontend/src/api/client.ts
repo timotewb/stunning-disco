@@ -6,6 +6,7 @@ import type {
   Snapshot,
   MatrixEntry,
   Allocation,
+  WorkRequest,
   AllocationTypeConfig,
   SeniorityConfig,
   SMEAssignment,
@@ -66,13 +67,22 @@ export const upsertMatrixEntry = (data: {
 }) => api.post<MatrixEntry>('/matrix-entry', data).then((r) => r.data);
 export const deleteMatrixEntry = (id: string) => api.delete(`/matrix-entry/${id}`);
 
-// Allocations
+// Allocations (legacy — kept for backward compatibility during transition)
 export const getAllocations = () => api.get<Allocation[]>('/allocations').then((r) => r.data);
 export const createAllocation = (data: Omit<Allocation, 'id' | 'teamMember'>) =>
   api.post<Allocation>('/allocations', data).then((r) => r.data);
 export const updateAllocation = (id: string, data: Partial<Allocation>) =>
   api.put<Allocation>(`/allocations/${id}`, data).then((r) => r.data);
 export const deleteAllocation = (id: string) => api.delete(`/allocations/${id}`);
+
+// Work Requests
+export const getWorkRequests = (params?: { isAllocated?: boolean }) =>
+  api.get<WorkRequest[]>('/requests', { params }).then((r) => r.data);
+export const createWorkRequest = (data: Partial<WorkRequest>) =>
+  api.post<WorkRequest>('/requests', data).then((r) => r.data);
+export const updateWorkRequest = (id: string, data: Partial<WorkRequest>) =>
+  api.put<WorkRequest>(`/requests/${id}`, data).then((r) => r.data);
+export const deleteWorkRequest = (id: string) => api.delete(`/requests/${id}`);
 
 // Allocation Types
 export const getAllocationTypes = () =>

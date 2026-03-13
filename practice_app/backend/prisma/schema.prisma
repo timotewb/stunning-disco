@@ -22,6 +22,7 @@ model TeamMember {
   createdAt     DateTime        @default(now())
   matrixEntries MatrixEntry[]
   allocations   Allocation[]
+  workRequests  WorkRequest[]   @relation("RequestAssignee")
   primarySME    SMEAssignment[] @relation("PrimarySME")
   backupSME     SMEAssignment[] @relation("BackupSME")
 }
@@ -83,6 +84,40 @@ model AllocationTypeConfig {
   name      String   @unique
   color     String   @default("gray")
   createdAt DateTime @default(now())
+}
+
+model WorkRequest {
+  id                  String      @id @default(uuid())
+  title               String
+  description         String?
+  source              String      @default("planning")
+  sourceDetail        String?
+  type                String      @default("other")
+  priority            String      @default("medium")
+  status              String      @default("new")
+  isDraft             Boolean     @default(false)
+  effort              String?
+  dateRaised          DateTime    @default(now())
+  dateResolved        DateTime?
+  assigneeId          String?
+  assignee            TeamMember? @relation("RequestAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  // Allocation section — populated when the request is scheduled on the Timeline
+  isAllocated         Boolean     @default(false)
+  allocationType      String?
+  allocationStartDate DateTime?
+  allocationEndDate   DateTime?
+  allocationNotes     String?
+  // Metadata
+  noteRef             String?
+  tags                String      @default("[]")
+  externalRef         String?
+  dimensionNodeIds    String      @default("[]")
+  notes               String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  @@index([isAllocated, allocationStartDate, allocationEndDate])
+  @@index([assigneeId, isAllocated])
 }
 
 model SeniorityConfig {

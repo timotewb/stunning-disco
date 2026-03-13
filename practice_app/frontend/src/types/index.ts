@@ -53,6 +53,35 @@ export interface Allocation {
   teamMember?: TeamMember;
 }
 
+export interface WorkRequest {
+  id: string;
+  title: string;
+  description?: string;
+  source: string;
+  sourceDetail?: string;
+  type: string;
+  priority: string;
+  status: string;
+  isDraft: boolean;
+  effort?: string;
+  dateRaised: string;
+  dateResolved?: string;
+  assigneeId?: string;
+  assignee?: TeamMember;
+  isAllocated: boolean;
+  allocationType?: string;
+  allocationStartDate?: string;
+  allocationEndDate?: string;
+  allocationNotes?: string;
+  noteRef?: string;
+  tags: string[];
+  externalRef?: string;
+  dimensionNodeIds: string[];
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AllocationTypeConfig {
   id: string;
   name: string;
