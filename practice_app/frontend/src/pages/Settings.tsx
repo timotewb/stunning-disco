@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
-import type { Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig, AiStatus, OllamaModel, AiPrompts } from '../types';
+import type {
+  Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig, AiStatus, OllamaModel, AiPrompts,
+  Contact, RequestSourceConfig, RequestTypeConfig, RequestPriorityConfig, RequestStatusConfig, RequestEffortConfig,
+} from '../types';
 import {
   getDimensions,
   createDimension,
@@ -26,6 +29,25 @@ import {
   getAiPrompts,
   saveAiPrompts,
   resetAiPrompt,
+  getContacts,
+  createContact,
+  updateContact,
+  deleteContact,
+  getRequestSourceConfigs,
+  createRequestSourceConfig,
+  deleteRequestSourceConfig,
+  getRequestTypeConfigs,
+  createRequestTypeConfig,
+  deleteRequestTypeConfig,
+  getRequestPriorityConfigs,
+  createRequestPriorityConfig,
+  deleteRequestPriorityConfig,
+  getRequestStatusConfigs,
+  createRequestStatusConfig,
+  deleteRequestStatusConfig,
+  getRequestEffortConfigs,
+  createRequestEffortConfig,
+  deleteRequestEffortConfig,
 } from '../api/client';
 import { useSnapshot } from '../context/SnapshotContext';
 
@@ -81,6 +103,34 @@ const Settings: React.FC = () => {
   const [promptSaving, setPromptSaving]         = useState<keyof AiPrompts | null>(null);
   const [promptSaved, setPromptSaved]           = useState<keyof AiPrompts | null>(null);
   const [promptResetting, setPromptResetting]   = useState<keyof AiPrompts | null>(null);
+
+  // Contact directory state
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(true);
+  const [newContact, setNewContact] = useState({ name: '', role: '', team: '', email: '' });
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const [deleteConfirmContact, setDeleteConfirmContact] = useState<string | null>(null);
+
+  // Request taxonomy config state
+  const [reqSources, setReqSources] = useState<RequestSourceConfig[]>([]);
+  const [newReqSource, setNewReqSource] = useState({ name: '', color: 'gray' });
+  const [deleteConfirmReqSource, setDeleteConfirmReqSource] = useState<string | null>(null);
+
+  const [reqTypes, setReqTypes] = useState<RequestTypeConfig[]>([]);
+  const [newReqType, setNewReqType] = useState({ name: '', color: 'gray' });
+  const [deleteConfirmReqType, setDeleteConfirmReqType] = useState<string | null>(null);
+
+  const [reqPriorities, setReqPriorities] = useState<RequestPriorityConfig[]>([]);
+  const [newReqPriority, setNewReqPriority] = useState({ name: '', color: 'gray' });
+  const [deleteConfirmReqPriority, setDeleteConfirmReqPriority] = useState<string | null>(null);
+
+  const [reqStatuses, setReqStatuses] = useState<RequestStatusConfig[]>([]);
+  const [newReqStatus, setNewReqStatus] = useState({ name: '', color: 'gray' });
+  const [deleteConfirmReqStatus, setDeleteConfirmReqStatus] = useState<string | null>(null);
+
+  const [reqEfforts, setReqEfforts] = useState<RequestEffortConfig[]>([]);
+  const [newReqEffort, setNewReqEffort] = useState({ name: '', value: '' });
+  const [deleteConfirmReqEffort, setDeleteConfirmReqEffort] = useState<string | null>(null);
 
   const AVAILABLE_COLORS = ['indigo','amber','green','blue','purple','rose','teal','orange','cyan','pink','gray'];
   const COLOR_SWATCHES: Record<string, string> = {
@@ -143,7 +193,30 @@ const Settings: React.FC = () => {
     setPromptDraft({ noteSummarise: p.noteSummarise });
   };
 
-  useEffect(() => { load(); loadSnapshots(); loadAllocTypes(); loadSeniorityConfigs(); loadAiStatus(); loadAiPrompts(); }, []);
+  const loadContacts = async () => {
+    setContactsLoading(true);
+    try { setContacts(await getContacts()); } finally { setContactsLoading(false); }
+  };
+
+  const loadReqConfigs = async () => {
+    const [src, typ, pri, sts, eff] = await Promise.all([
+      getRequestSourceConfigs(),
+      getRequestTypeConfigs(),
+      getRequestPriorityConfigs(),
+      getRequestStatusConfigs(),
+      getRequestEffortConfigs(),
+    ]);
+    setReqSources(src);
+    setReqTypes(typ);
+    setReqPriorities(pri);
+    setReqStatuses(sts);
+    setReqEfforts(eff);
+  };
+
+  useEffect(() => {
+    load(); loadSnapshots(); loadAllocTypes(); loadSeniorityConfigs(); loadAiStatus(); loadAiPrompts();
+    loadContacts(); loadReqConfigs();
+  }, []);
 
   const toggleDim = (id: string) => {
     setExpandedDims((prev) => {
@@ -1006,6 +1079,217 @@ const Settings: React.FC = () => {
 
           </div>
         )}
+      </section>
+
+      {/* ── Contact Directory ─────────────────────────────────── */}
+      <section className="mt-10">
+        <h3 className="text-lg font-semibold text-gray-800 mb-1">Contact Directory</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Requestors — people outside the team who raise work requests. Not the same as team members.
+        </p>
+
+        {/* Add new contact */}
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              value={editingContact ? editingContact.name : newContact.name}
+              onChange={(e) => editingContact ? setEditingContact({...editingContact, name: e.target.value}) : setNewContact({...newContact, name: e.target.value})}
+              placeholder="Name *"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+            <input
+              value={editingContact ? (editingContact.role ?? '') : newContact.role}
+              onChange={(e) => editingContact ? setEditingContact({...editingContact, role: e.target.value}) : setNewContact({...newContact, role: e.target.value})}
+              placeholder="Role"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+            <input
+              value={editingContact ? (editingContact.team ?? '') : newContact.team}
+              onChange={(e) => editingContact ? setEditingContact({...editingContact, team: e.target.value}) : setNewContact({...newContact, team: e.target.value})}
+              placeholder="Team / Organisation"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+            <input
+              value={editingContact ? (editingContact.email ?? '') : newContact.email}
+              onChange={(e) => editingContact ? setEditingContact({...editingContact, email: e.target.value}) : setNewContact({...newContact, email: e.target.value})}
+              placeholder="Email (optional)"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+          </div>
+          <div className="flex gap-2">
+            {editingContact ? (
+              <>
+                <button
+                  onClick={async () => {
+                    if (!editingContact.name.trim()) return;
+                    await updateContact(editingContact.id, editingContact);
+                    setEditingContact(null);
+                    loadContacts();
+                  }}
+                  className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                >Save</button>
+                <button onClick={() => setEditingContact(null)} className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+              </>
+            ) : (
+              <button
+                onClick={async () => {
+                  if (!newContact.name.trim()) return;
+                  await createContact(newContact);
+                  setNewContact({ name: '', role: '', team: '', email: '' });
+                  loadContacts();
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              ><Plus size={14} /> Add Contact</button>
+            )}
+          </div>
+        </div>
+
+        {contactsLoading ? (
+          <div className="text-sm text-gray-400">Loading…</div>
+        ) : contacts.length === 0 ? (
+          <div className="text-sm text-gray-400">No contacts yet.</div>
+        ) : (
+          <div className="space-y-1">
+            {contacts.map((c) => (
+              <div key={c.id} className="flex items-center gap-3 px-3 py-2 bg-white border border-gray-100 rounded-lg hover:bg-gray-50">
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium text-sm text-gray-800">{c.name}</span>
+                  {(c.role || c.team) && (
+                    <span className="ml-2 text-xs text-gray-400">{[c.role, c.team].filter(Boolean).join(' · ')}</span>
+                  )}
+                </div>
+                <button onClick={() => setEditingContact(c)} className="p-1 text-gray-400 hover:text-gray-600"><Pencil size={13} /></button>
+                {deleteConfirmContact === c.id ? (
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={async () => { await deleteContact(c.id); setDeleteConfirmContact(null); loadContacts(); }} className="text-red-600 text-xs flex items-center gap-1"><Check size={12}/> Confirm</button>
+                    <button onClick={() => setDeleteConfirmContact(null)} className="text-gray-400"><X size={12}/></button>
+                  </div>
+                ) : (
+                  <button onClick={() => setDeleteConfirmContact(c.id)} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── Request Taxonomies ────────────────────────────────── */}
+      <section className="mt-10">
+        <h3 className="text-lg font-semibold text-gray-800 mb-1">Request Taxonomies</h3>
+        <p className="text-sm text-gray-500 mb-6">
+          Configure the drop-down values used in the Demand Ledger. All taxonomies are fully customisable.
+        </p>
+
+        {/* Helper: compact taxonomy config block */}
+        {[
+          { label: 'Sources', items: reqSources, newState: newReqSource, setNew: setNewReqSource, deleteConfirm: deleteConfirmReqSource, setDelete: setDeleteConfirmReqSource, hasColor: true, hasValue: false,
+            onCreate: async () => { if (!newReqSource.name.trim()) return; await createRequestSourceConfig({ name: newReqSource.name, color: newReqSource.color, orderIndex: reqSources.length }); setNewReqSource({ name: '', color: 'gray' }); loadReqConfigs(); },
+            onDelete: async (id: string) => { await deleteRequestSourceConfig(id); setDeleteConfirmReqSource(null); loadReqConfigs(); },
+          },
+          { label: 'Types', items: reqTypes, newState: newReqType, setNew: setNewReqType, deleteConfirm: deleteConfirmReqType, setDelete: setDeleteConfirmReqType, hasColor: true, hasValue: false,
+            onCreate: async () => { if (!newReqType.name.trim()) return; await createRequestTypeConfig({ name: newReqType.name, color: newReqType.color, orderIndex: reqTypes.length }); setNewReqType({ name: '', color: 'gray' }); loadReqConfigs(); },
+            onDelete: async (id: string) => { await deleteRequestTypeConfig(id); setDeleteConfirmReqType(null); loadReqConfigs(); },
+          },
+          { label: 'Priorities', items: reqPriorities, newState: newReqPriority, setNew: setNewReqPriority, deleteConfirm: deleteConfirmReqPriority, setDelete: setDeleteConfirmReqPriority, hasColor: true, hasValue: false,
+            onCreate: async () => { if (!newReqPriority.name.trim()) return; await createRequestPriorityConfig({ name: newReqPriority.name, color: newReqPriority.color, orderIndex: reqPriorities.length }); setNewReqPriority({ name: '', color: 'gray' }); loadReqConfigs(); },
+            onDelete: async (id: string) => { await deleteRequestPriorityConfig(id); setDeleteConfirmReqPriority(null); loadReqConfigs(); },
+          },
+          { label: 'Statuses', items: reqStatuses, newState: newReqStatus, setNew: setNewReqStatus, deleteConfirm: deleteConfirmReqStatus, setDelete: setDeleteConfirmReqStatus, hasColor: true, hasValue: false,
+            onCreate: async () => { if (!newReqStatus.name.trim()) return; await createRequestStatusConfig({ name: newReqStatus.name, color: newReqStatus.color, orderIndex: reqStatuses.length }); setNewReqStatus({ name: '', color: 'gray' }); loadReqConfigs(); },
+            onDelete: async (id: string) => { await deleteRequestStatusConfig(id); setDeleteConfirmReqStatus(null); loadReqConfigs(); },
+          },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ].map(({ label, items, newState, setNew, deleteConfirm: dc, setDelete, hasColor, onCreate, onDelete }: any) => (
+          <div key={label} className="mb-8">
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">{label}</h4>
+            <div className="flex items-center gap-2 mb-3">
+              <input
+                value={newState.name}
+                onChange={(e) => setNew({ ...newState, name: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && onCreate()}
+                placeholder={`New ${label.toLowerCase().slice(0, -1)}…`}
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              />
+              {hasColor && (
+                <select
+                  value={newState.color}
+                  onChange={(e) => setNew({ ...newState, color: e.target.value })}
+                  className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
+                >
+                  {AVAILABLE_COLORS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
+              <button
+                onClick={onCreate}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              ><Plus size={14}/> Add</button>
+            </div>
+            <div className="space-y-1">
+              {items.map((item: RequestSourceConfig) => (
+                <div key={item.id} className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-100 rounded-lg hover:bg-gray-50">
+                  {hasColor && (
+                    <span className={`w-3 h-3 rounded-full flex-shrink-0 ${COLOR_SWATCHES[item.color] ?? 'bg-gray-400'}`} />
+                  )}
+                  <span className="flex-1 text-sm text-gray-700">{item.name}</span>
+                  {dc === item.id ? (
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => onDelete(item.id)} className="text-red-600 text-xs flex items-center gap-1"><Check size={12}/> Confirm</button>
+                      <button onClick={() => setDelete(null)} className="text-gray-400"><X size={12}/></button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setDelete(item.id)} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
+                  )}
+                </div>
+              ))}
+              {items.length === 0 && <div className="text-xs text-gray-400">None configured.</div>}
+            </div>
+          </div>
+        ))}
+
+        {/* Effort — has both name and value fields */}
+        <div className="mb-8">
+          <h4 className="text-sm font-semibold text-gray-700 mb-2">Effort Sizes</h4>
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              value={newReqEffort.name}
+              onChange={(e) => setNewReqEffort({ ...newReqEffort, name: e.target.value })}
+              placeholder="Label (e.g. S — 1–2 days)"
+              className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+            <input
+              value={newReqEffort.value}
+              onChange={(e) => setNewReqEffort({ ...newReqEffort, value: e.target.value })}
+              placeholder="Value (e.g. s)"
+              className="w-24 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+            <button
+              onClick={async () => {
+                if (!newReqEffort.name.trim() || !newReqEffort.value.trim()) return;
+                await createRequestEffortConfig({ name: newReqEffort.name, value: newReqEffort.value, orderIndex: reqEfforts.length });
+                setNewReqEffort({ name: '', value: '' });
+                loadReqConfigs();
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            ><Plus size={14}/> Add</button>
+          </div>
+          <div className="space-y-1">
+            {reqEfforts.map((e) => (
+              <div key={e.id} className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-100 rounded-lg hover:bg-gray-50">
+                <span className="text-xs font-mono text-gray-400 w-8">{e.value}</span>
+                <span className="flex-1 text-sm text-gray-700">{e.name}</span>
+                {deleteConfirmReqEffort === e.id ? (
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={async () => { await deleteRequestEffortConfig(e.id); setDeleteConfirmReqEffort(null); loadReqConfigs(); }} className="text-red-600 text-xs flex items-center gap-1"><Check size={12}/> Confirm</button>
+                    <button onClick={() => setDeleteConfirmReqEffort(null)} className="text-gray-400"><X size={12}/></button>
+                  </div>
+                ) : (
+                  <button onClick={() => setDeleteConfirmReqEffort(e.id)} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
+                )}
+              </div>
+            ))}
+            {reqEfforts.length === 0 && <div className="text-xs text-gray-400">None configured.</div>}
+          </div>
+        </div>
       </section>
     </div>
   );

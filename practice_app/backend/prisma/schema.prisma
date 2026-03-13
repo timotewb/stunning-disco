@@ -99,6 +99,8 @@ model WorkRequest {
   effort              String?
   dateRaised          DateTime    @default(now())
   dateResolved        DateTime?
+  requestorId         String?
+  requestor           Contact?    @relation(fields: [requestorId], references: [id], onDelete: SetNull)
   assigneeId          String?
   assignee            TeamMember? @relation("RequestAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   // Allocation section — populated when the request is scheduled on the Timeline
@@ -118,6 +120,59 @@ model WorkRequest {
 
   @@index([isAllocated, allocationStartDate, allocationEndDate])
   @@index([assigneeId, isAllocated])
+  @@index([requestorId])
+}
+
+model Contact {
+  id           String        @id @default(uuid())
+  name         String
+  role         String?
+  team         String?
+  email        String?
+  notes        String?
+  requests     WorkRequest[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model RequestSourceConfig {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String   @default("gray")
+  orderIndex Int     @default(0)
+  createdAt DateTime @default(now())
+}
+
+model RequestTypeConfig {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String   @default("gray")
+  orderIndex Int     @default(0)
+  createdAt DateTime @default(now())
+}
+
+model RequestPriorityConfig {
+  id         String   @id @default(uuid())
+  name       String   @unique
+  color      String   @default("gray")
+  orderIndex Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
+model RequestStatusConfig {
+  id         String   @id @default(uuid())
+  name       String   @unique
+  color      String   @default("gray")
+  orderIndex Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
+model RequestEffortConfig {
+  id         String   @id @default(uuid())
+  name       String   @unique
+  value      String   @unique
+  orderIndex Int      @default(0)
+  createdAt  DateTime @default(now())
 }
 
 model SeniorityConfig {

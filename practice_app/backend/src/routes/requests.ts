@@ -7,20 +7,76 @@ const prisma = new PrismaClient();
 
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { isAllocated } = req.query;
+    const {
+      isAllocated,
+      isDraft,
+      source,
+      type,
+      priority,
+      status,
+      assigneeId,
+      from,
+      to,
+      raisedFrom,
+      raisedTo,
+      q,
+    } = req.query;
 
-    const where: Record<string, unknown> = {};
-    if (isAllocated !== undefined) {
-      where.isAllocated = isAllocated === 'true';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: Record<string, any> = {};
+
+    if (isAllocated !== undefined) where.isAllocated = isAllocated === 'true';
+    if (isDraft !== undefined) where.isDraft = isDraft === 'true';
+    if (source) where.source = { in: String(source).split(',') };
+    if (type) where.type = { in: String(type).split(',') };
+    if (priority) where.priority = { in: String(priority).split(',') };
+    if (status) where.status = { in: String(status).split(',') };
+    if (assigneeId) where.assigneeId = { in: String(assigneeId).split(',') };
+
+    // Timeline range filter (allocation dates)
+    if (from || to) {
+      if (from) where.allocationEndDate = { gte: new Date(String(from)) };
+      if (to) where.allocationStartDate = { lte: new Date(String(to)) };
     }
+
+    // Date raised range filter
+    if (raisedFrom || raisedTo) {
+      where.dateRaised = {};
+      if (raisedFrom) where.dateRaised.gte = new Date(String(raisedFrom));
+      if (raisedTo) where.dateRaised.lte = new Date(String(raisedTo));
+    }
+
+    // Free-text search across title, description, externalRef, tags
+    if (q) {
+      const search = String(q);
+      where.OR = [
+        { title: { contains: search } },
+        { description: { contains: search } },
+        { externalRef: { contains: search } },
+        { tags: { contains: search } },
+        { requestor: { name: { contains: search } } },
+        { requestor: { team: { contains: search } } },
+      ];
+    }
+
+    const orderBy = isAllocated === 'true'
+      ? { allocationStartDate: 'asc' as const }
+      : { dateRaised: 'desc' as const };
 
     const requests = await prisma.workRequest.findMany({
       where,
-      include: { assignee: true },
-      orderBy: { allocationStartDate: 'asc' },
+      include: { assignee: true, requestor: true },
+      orderBy,
     });
 
-    res.json(requests);
+    // Deserialise JSON string fields
+    const result = requests.map((r) => ({
+      ...r,
+      tags: (() => { try { return JSON.parse(r.tags); } catch { return []; } })(),
+      dimensionNodeIds: (() => { try { return JSON.parse(r.dimensionNodeIds); } catch { return []; } })(),
+    }));
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -40,6 +96,7 @@ router.post('/', async (req: Request, res: Response) => {
       effort,
       dateRaised,
       dateResolved,
+      requestorId,
       assigneeId,
       isAllocated = false,
       allocationType,
@@ -53,6 +110,12 @@ router.post('/', async (req: Request, res: Response) => {
       notes,
     } = req.body;
 
+    // Auto-advance status to in-flight when allocating
+    let resolvedStatus = status;
+    if (isAllocated && (status === 'new' || status === 'assessed')) {
+      resolvedStatus = 'in-flight';
+    }
+
     const request = await prisma.workRequest.create({
       data: {
         id: uuidv4(),
@@ -62,11 +125,12 @@ router.post('/', async (req: Request, res: Response) => {
         sourceDetail,
         type,
         priority,
-        status,
+        status: resolvedStatus,
         isDraft,
         effort,
         dateRaised: dateRaised ? new Date(dateRaised) : new Date(),
         dateResolved: dateResolved ? new Date(dateResolved) : undefined,
+        requestorId: requestorId || undefined,
         assigneeId: assigneeId || undefined,
         isAllocated,
         allocationType,
@@ -81,10 +145,14 @@ router.post('/', async (req: Request, res: Response) => {
           : dimensionNodeIds,
         notes,
       },
-      include: { assignee: true },
+      include: { assignee: true, requestor: true },
     });
 
-    res.status(201).json(request);
+    res.status(201).json({
+      ...request,
+      tags: (() => { try { return JSON.parse(request.tags); } catch { return []; } })(),
+      dimensionNodeIds: (() => { try { return JSON.parse(request.dimensionNodeIds); } catch { return []; } })(),
+    });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -105,6 +173,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       effort,
       dateRaised,
       dateResolved,
+      requestorId,
       assigneeId,
       isAllocated,
       allocationType,
@@ -118,6 +187,18 @@ router.put('/:id', async (req: Request, res: Response) => {
       notes,
     } = req.body;
 
+    // Auto-advance status when allocating
+    let resolvedStatus = status;
+    if (isAllocated === true && (status === 'new' || status === 'assessed')) {
+      resolvedStatus = 'in-flight';
+    } else if (isAllocated === true && status === undefined) {
+      // Check current status and auto-advance if needed
+      const current = await prisma.workRequest.findUnique({ where: { id }, select: { status: true } });
+      if (current && (current.status === 'new' || current.status === 'assessed')) {
+        resolvedStatus = 'in-flight';
+      }
+    }
+
     const request = await prisma.workRequest.update({
       where: { id },
       data: {
@@ -127,13 +208,14 @@ router.put('/:id', async (req: Request, res: Response) => {
         ...(sourceDetail !== undefined && { sourceDetail }),
         ...(type !== undefined && { type }),
         ...(priority !== undefined && { priority }),
-        ...(status !== undefined && { status }),
+        ...((resolvedStatus !== undefined) && { status: resolvedStatus }),
         ...(isDraft !== undefined && { isDraft }),
         ...(effort !== undefined && { effort }),
         ...(dateRaised !== undefined && { dateRaised: new Date(dateRaised) }),
         ...(dateResolved !== undefined && {
           dateResolved: dateResolved ? new Date(dateResolved) : null,
         }),
+        ...(requestorId !== undefined && { requestorId: requestorId || null }),
         ...(assigneeId !== undefined && { assigneeId: assigneeId || null }),
         ...(isAllocated !== undefined && { isAllocated }),
         ...(allocationType !== undefined && { allocationType }),
@@ -156,10 +238,14 @@ router.put('/:id', async (req: Request, res: Response) => {
         }),
         ...(notes !== undefined && { notes }),
       },
-      include: { assignee: true },
+      include: { assignee: true, requestor: true },
     });
 
-    res.json(request);
+    res.json({
+      ...request,
+      tags: (() => { try { return JSON.parse(request.tags); } catch { return []; } })(),
+      dimensionNodeIds: (() => { try { return JSON.parse(request.dimensionNodeIds); } catch { return []; } })(),
+    });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -176,3 +262,4 @@ router.delete('/:id', async (req: Request, res: Response) => {
 });
 
 export default router;
+

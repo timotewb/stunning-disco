@@ -66,6 +66,8 @@ export interface WorkRequest {
   effort?: string;
   dateRaised: string;
   dateResolved?: string;
+  requestorId?: string;
+  requestor?: Contact;
   assigneeId?: string;
   assignee?: TeamMember;
   isAllocated: boolean;
@@ -80,6 +82,57 @@ export interface WorkRequest {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  role?: string;
+  team?: string;
+  email?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RequestSourceConfig {
+  id: string;
+  name: string;
+  color: string;
+  orderIndex: number;
+  createdAt: string;
+}
+
+export interface RequestTypeConfig {
+  id: string;
+  name: string;
+  color: string;
+  orderIndex: number;
+  createdAt: string;
+}
+
+export interface RequestPriorityConfig {
+  id: string;
+  name: string;
+  color: string;
+  orderIndex: number;
+  createdAt: string;
+}
+
+export interface RequestStatusConfig {
+  id: string;
+  name: string;
+  color: string;
+  orderIndex: number;
+  createdAt: string;
+}
+
+export interface RequestEffortConfig {
+  id: string;
+  name: string;
+  value: string;
+  orderIndex: number;
+  createdAt: string;
 }
 
 export interface AllocationTypeConfig {

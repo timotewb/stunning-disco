@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Team from './pages/Team';
 import Matrices from './pages/Matrices';
 import Timeline from './pages/Timeline';
+import Requests from './pages/Requests';
 import Capabilities from './pages/Capabilities';
 import Settings from './pages/Settings';
 import Notes from './pages/Notes';
@@ -23,6 +24,7 @@ const App: React.FC = () => {
               <Route path="team" element={<Team />} />
               <Route path="matrices" element={<Matrices />} />
               <Route path="timeline" element={<Timeline />} />
+              <Route path="requests" element={<Requests />} />
               <Route path="capabilities" element={<Capabilities />} />
               <Route path="notes" element={<Notes />} />
               <Route path="settings" element={<Settings />} />

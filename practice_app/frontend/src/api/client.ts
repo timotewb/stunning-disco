@@ -7,8 +7,14 @@ import type {
   MatrixEntry,
   Allocation,
   WorkRequest,
+  Contact,
   AllocationTypeConfig,
   SeniorityConfig,
+  RequestSourceConfig,
+  RequestTypeConfig,
+  RequestPriorityConfig,
+  RequestStatusConfig,
+  RequestEffortConfig,
   SMEAssignment,
   NoteListItem,
   Note,
@@ -76,13 +82,77 @@ export const updateAllocation = (id: string, data: Partial<Allocation>) =>
 export const deleteAllocation = (id: string) => api.delete(`/allocations/${id}`);
 
 // Work Requests
-export const getWorkRequests = (params?: { isAllocated?: boolean }) =>
+export type WorkRequestFilters = {
+  isAllocated?: boolean;
+  isDraft?: boolean;
+  source?: string;
+  type?: string;
+  priority?: string;
+  status?: string;
+  assigneeId?: string;
+  from?: string;
+  to?: string;
+  raisedFrom?: string;
+  raisedTo?: string;
+  q?: string;
+};
+export const getWorkRequests = (params?: WorkRequestFilters) =>
   api.get<WorkRequest[]>('/requests', { params }).then((r) => r.data);
 export const createWorkRequest = (data: Partial<WorkRequest>) =>
   api.post<WorkRequest>('/requests', data).then((r) => r.data);
 export const updateWorkRequest = (id: string, data: Partial<WorkRequest>) =>
   api.put<WorkRequest>(`/requests/${id}`, data).then((r) => r.data);
 export const deleteWorkRequest = (id: string) => api.delete(`/requests/${id}`);
+
+// Contacts
+export const getContacts = (q?: string) =>
+  api.get<Contact[]>('/contacts', { params: q ? { q } : {} }).then((r) => r.data);
+export const createContact = (data: Omit<Contact, 'id' | 'createdAt' | 'updatedAt'>) =>
+  api.post<Contact>('/contacts', data).then((r) => r.data);
+export const updateContact = (id: string, data: Partial<Contact>) =>
+  api.put<Contact>(`/contacts/${id}`, data).then((r) => r.data);
+export const deleteContact = (id: string) => api.delete(`/contacts/${id}`);
+
+// Request taxonomy configs
+export const getRequestSourceConfigs = () =>
+  api.get<RequestSourceConfig[]>('/request-source-config').then((r) => r.data);
+export const createRequestSourceConfig = (data: Omit<RequestSourceConfig, 'id' | 'createdAt'>) =>
+  api.post<RequestSourceConfig>('/request-source-config', data).then((r) => r.data);
+export const updateRequestSourceConfig = (id: string, data: Partial<RequestSourceConfig>) =>
+  api.put<RequestSourceConfig>(`/request-source-config/${id}`, data).then((r) => r.data);
+export const deleteRequestSourceConfig = (id: string) => api.delete(`/request-source-config/${id}`);
+
+export const getRequestTypeConfigs = () =>
+  api.get<RequestTypeConfig[]>('/request-type-config').then((r) => r.data);
+export const createRequestTypeConfig = (data: Omit<RequestTypeConfig, 'id' | 'createdAt'>) =>
+  api.post<RequestTypeConfig>('/request-type-config', data).then((r) => r.data);
+export const updateRequestTypeConfig = (id: string, data: Partial<RequestTypeConfig>) =>
+  api.put<RequestTypeConfig>(`/request-type-config/${id}`, data).then((r) => r.data);
+export const deleteRequestTypeConfig = (id: string) => api.delete(`/request-type-config/${id}`);
+
+export const getRequestPriorityConfigs = () =>
+  api.get<RequestPriorityConfig[]>('/request-priority-config').then((r) => r.data);
+export const createRequestPriorityConfig = (data: Omit<RequestPriorityConfig, 'id' | 'createdAt'>) =>
+  api.post<RequestPriorityConfig>('/request-priority-config', data).then((r) => r.data);
+export const updateRequestPriorityConfig = (id: string, data: Partial<RequestPriorityConfig>) =>
+  api.put<RequestPriorityConfig>(`/request-priority-config/${id}`, data).then((r) => r.data);
+export const deleteRequestPriorityConfig = (id: string) => api.delete(`/request-priority-config/${id}`);
+
+export const getRequestStatusConfigs = () =>
+  api.get<RequestStatusConfig[]>('/request-status-config').then((r) => r.data);
+export const createRequestStatusConfig = (data: Omit<RequestStatusConfig, 'id' | 'createdAt'>) =>
+  api.post<RequestStatusConfig>('/request-status-config', data).then((r) => r.data);
+export const updateRequestStatusConfig = (id: string, data: Partial<RequestStatusConfig>) =>
+  api.put<RequestStatusConfig>(`/request-status-config/${id}`, data).then((r) => r.data);
+export const deleteRequestStatusConfig = (id: string) => api.delete(`/request-status-config/${id}`);
+
+export const getRequestEffortConfigs = () =>
+  api.get<RequestEffortConfig[]>('/request-effort-config').then((r) => r.data);
+export const createRequestEffortConfig = (data: Omit<RequestEffortConfig, 'id' | 'createdAt'>) =>
+  api.post<RequestEffortConfig>('/request-effort-config', data).then((r) => r.data);
+export const updateRequestEffortConfig = (id: string, data: Partial<RequestEffortConfig>) =>
+  api.put<RequestEffortConfig>(`/request-effort-config/${id}`, data).then((r) => r.data);
+export const deleteRequestEffortConfig = (id: string) => api.delete(`/request-effort-config/${id}`);
 
 // Allocation Types
 export const getAllocationTypes = () =>
