@@ -2,5 +2,6 @@
 
 
 
-- extend the functionality of the notes view to include a toggle which flips between daily notes, and team member notes view. when on the team member notes view i can selec from a drop down of all team member names and see all the notes just for them. this will be useful when having one-on-ones. the layout of the notes view will remain very similar for either toggle view. these notes will be saved in the same way as the daily notes with the same naming etc but under a subdirectory for each team member (folder name contains only letters numbers and underscores).
+- please help design a novel way to track incomming work where "requests" come in from many different sources (MS Teams, Slack, Jira, Asana, Calls, Conversations, Quartely Planning). I do not want to replace a tool like Jira, rather have a single place where i can record, categorise, track and search for work. This would allow me to see over time the requests that come in, overlay that with different metris/cataegories and potentially use this to inform resourcing decisions in the future. please document your recommendation in a new markdown file.
 - data import and export in settings where all database 
+- 
