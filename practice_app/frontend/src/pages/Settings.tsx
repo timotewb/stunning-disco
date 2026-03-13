@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown, Loader2, ToggleLeft, ToggleRight } from 'lucide-react';
 import type {
   Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig, AiStatus, OllamaModel, AiPrompts,
-  Contact, RequestSourceConfig, RequestTypeConfig, RequestPriorityConfig, RequestStatusConfig, RequestEffortConfig,
+  RequestSourceConfig, RequestTypeConfig, RequestPriorityConfig, RequestStatusConfig, RequestEffortConfig,
+  ScannerConfig,
 } from '../types';
 import {
   getDimensions,
@@ -29,10 +30,6 @@ import {
   getAiPrompts,
   saveAiPrompts,
   resetAiPrompt,
-  getContacts,
-  createContact,
-  updateContact,
-  deleteContact,
   getRequestSourceConfigs,
   createRequestSourceConfig,
   deleteRequestSourceConfig,
@@ -48,6 +45,8 @@ import {
   getRequestEffortConfigs,
   createRequestEffortConfig,
   deleteRequestEffortConfig,
+  getScannerConfig,
+  saveScannerConfig,
 } from '../api/client';
 import { useSnapshot } from '../context/SnapshotContext';
 
@@ -104,12 +103,11 @@ const Settings: React.FC = () => {
   const [promptSaved, setPromptSaved]           = useState<keyof AiPrompts | null>(null);
   const [promptResetting, setPromptResetting]   = useState<keyof AiPrompts | null>(null);
 
-  // Contact directory state
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [contactsLoading, setContactsLoading] = useState(true);
-  const [newContact, setNewContact] = useState({ name: '', role: '', team: '', email: '' });
-  const [editingContact, setEditingContact] = useState<Contact | null>(null);
-  const [deleteConfirmContact, setDeleteConfirmContact] = useState<string | null>(null);
+  // Scanner config state
+  const [scannerCfg, setScannerCfg] = useState<ScannerConfig | null>(null);
+  const [scannerSaving, setScannerSaving] = useState(false);
+  const [scannerSaved, setScannerSaved] = useState(false);
+  const [newFolderInput, setNewFolderInput] = useState('');
 
   // Request taxonomy config state
   const [reqSources, setReqSources] = useState<RequestSourceConfig[]>([]);
@@ -190,12 +188,7 @@ const Settings: React.FC = () => {
   const loadAiPrompts = async () => {
     const p = await getAiPrompts();
     setAiPrompts(p);
-    setPromptDraft({ noteSummarise: p.noteSummarise });
-  };
-
-  const loadContacts = async () => {
-    setContactsLoading(true);
-    try { setContacts(await getContacts()); } finally { setContactsLoading(false); }
+    setPromptDraft({ noteSummarise: p.noteSummarise, requestExtract: p.requestExtract, requestParse: p.requestParse });
   };
 
   const loadReqConfigs = async () => {
@@ -215,7 +208,11 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     load(); loadSnapshots(); loadAllocTypes(); loadSeniorityConfigs(); loadAiStatus(); loadAiPrompts();
-    loadContacts(); loadReqConfigs();
+    loadReqConfigs();
+  }, []);
+
+  useEffect(() => {
+    getScannerConfig().then(setScannerCfg).catch(() => {});
   }, []);
 
   const toggleDim = (id: string) => {
@@ -432,6 +429,19 @@ const Settings: React.FC = () => {
       setPromptDraft((d) => ({ ...d, [key]: updated[key] }));
     } finally {
       setPromptResetting(null);
+    }
+  };
+
+  const handleSaveScannerCfg = async () => {
+    if (!scannerCfg) return;
+    setScannerSaving(true);
+    try {
+      const updated = await saveScannerConfig(scannerCfg);
+      setScannerCfg(updated);
+      setScannerSaved(true);
+      setTimeout(() => setScannerSaved(false), 2000);
+    } finally {
+      setScannerSaving(false);
     }
   };
 
@@ -1077,98 +1087,183 @@ const Settings: React.FC = () => {
               </div>
             </div>
 
+            {/* Work Request — Extract from Notes */}
+            <div className="border border-gray-200 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-1">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">Work Request — Extract from Notes</p>
+                  <p className="text-xs text-gray-500">Sent as the system instruction when scanning notes for work requests.</p>
+                </div>
+                <button
+                  onClick={() => handleResetPrompt('requestExtract')}
+                  disabled={promptResetting === 'requestExtract'}
+                  className="text-xs text-gray-400 hover:text-rose-500 disabled:opacity-50"
+                >
+                  {promptResetting === 'requestExtract' ? 'Resetting…' : 'Reset'}
+                </button>
+              </div>
+              <textarea
+                rows={4}
+                value={promptDraft.requestExtract ?? aiPrompts?.requestExtract ?? ''}
+                onChange={(e) => setPromptDraft((prev) => ({ ...prev, requestExtract: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none"
+              />
+              <div className="flex justify-end mt-2">
+                <button
+                  onClick={() => handleSavePrompt('requestExtract')}
+                  disabled={promptSaving === 'requestExtract'}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
+                >
+                  {promptSaving === 'requestExtract' ? 'Saving…' : promptSaved === 'requestExtract' ? 'Saved!' : 'Save'}
+                </button>
+              </div>
+            </div>
+
+            {/* Work Request — Paste & Parse */}
+            <div className="border border-gray-200 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-1">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">Work Request — Paste &amp; Parse</p>
+                  <p className="text-xs text-gray-500">Sent as the system instruction when parsing pasted text into a work request.</p>
+                </div>
+                <button
+                  onClick={() => handleResetPrompt('requestParse')}
+                  disabled={promptResetting === 'requestParse'}
+                  className="text-xs text-gray-400 hover:text-rose-500 disabled:opacity-50"
+                >
+                  {promptResetting === 'requestParse' ? 'Resetting…' : 'Reset'}
+                </button>
+              </div>
+              <textarea
+                rows={4}
+                value={promptDraft.requestParse ?? aiPrompts?.requestParse ?? ''}
+                onChange={(e) => setPromptDraft((prev) => ({ ...prev, requestParse: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none"
+              />
+              <div className="flex justify-end mt-2">
+                <button
+                  onClick={() => handleSavePrompt('requestParse')}
+                  disabled={promptSaving === 'requestParse'}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
+                >
+                  {promptSaving === 'requestParse' ? 'Saving…' : promptSaved === 'requestParse' ? 'Saved!' : 'Save'}
+                </button>
+              </div>
+            </div>
+
           </div>
         )}
       </section>
 
-      {/* ── Contact Directory ─────────────────────────────────── */}
+      {/* ── Notes Scanner ─────────────────────────────────────────────────── */}
       <section className="mt-10">
-        <h3 className="text-lg font-semibold text-gray-800 mb-1">Contact Directory</h3>
-        <p className="text-sm text-gray-500 mb-4">
-          Requestors — people outside the team who raise work requests. Not the same as team members.
-        </p>
+        <h2 className="text-base font-semibold text-gray-900 mb-1">Notes Scanner</h2>
+        <p className="text-sm text-gray-500 mb-4">Configure how the AI scans your notes for work requests.</p>
 
-        {/* Add new contact */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              value={editingContact ? editingContact.name : newContact.name}
-              onChange={(e) => editingContact ? setEditingContact({...editingContact, name: e.target.value}) : setNewContact({...newContact, name: e.target.value})}
-              placeholder="Name *"
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-            />
-            <input
-              value={editingContact ? (editingContact.role ?? '') : newContact.role}
-              onChange={(e) => editingContact ? setEditingContact({...editingContact, role: e.target.value}) : setNewContact({...newContact, role: e.target.value})}
-              placeholder="Role"
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-            />
-            <input
-              value={editingContact ? (editingContact.team ?? '') : newContact.team}
-              onChange={(e) => editingContact ? setEditingContact({...editingContact, team: e.target.value}) : setNewContact({...newContact, team: e.target.value})}
-              placeholder="Team / Organisation"
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-            />
-            <input
-              value={editingContact ? (editingContact.email ?? '') : newContact.email}
-              onChange={(e) => editingContact ? setEditingContact({...editingContact, email: e.target.value}) : setNewContact({...newContact, email: e.target.value})}
-              placeholder="Email (optional)"
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-            />
-          </div>
-          <div className="flex gap-2">
-            {editingContact ? (
-              <>
-                <button
-                  onClick={async () => {
-                    if (!editingContact.name.trim()) return;
-                    await updateContact(editingContact.id, editingContact);
-                    setEditingContact(null);
-                    loadContacts();
-                  }}
-                  className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-                >Save</button>
-                <button onClick={() => setEditingContact(null)} className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
-              </>
-            ) : (
-              <button
-                onClick={async () => {
-                  if (!newContact.name.trim()) return;
-                  await createContact(newContact);
-                  setNewContact({ name: '', role: '', team: '', email: '' });
-                  loadContacts();
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-              ><Plus size={14} /> Add Contact</button>
-            )}
-          </div>
-        </div>
-
-        {contactsLoading ? (
-          <div className="text-sm text-gray-400">Loading…</div>
-        ) : contacts.length === 0 ? (
-          <div className="text-sm text-gray-400">No contacts yet.</div>
+        {scannerCfg === null ? (
+          <div className="text-sm text-gray-400">Loading scanner config…</div>
         ) : (
-          <div className="space-y-1">
-            {contacts.map((c) => (
-              <div key={c.id} className="flex items-center gap-3 px-3 py-2 bg-white border border-gray-100 rounded-lg hover:bg-gray-50">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium text-sm text-gray-800">{c.name}</span>
-                  {(c.role || c.team) && (
-                    <span className="ml-2 text-xs text-gray-400">{[c.role, c.team].filter(Boolean).join(' · ')}</span>
-                  )}
-                </div>
-                <button onClick={() => setEditingContact(c)} className="p-1 text-gray-400 hover:text-gray-600"><Pencil size={13} /></button>
-                {deleteConfirmContact === c.id ? (
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={async () => { await deleteContact(c.id); setDeleteConfirmContact(null); loadContacts(); }} className="text-red-600 text-xs flex items-center gap-1"><Check size={12}/> Confirm</button>
-                    <button onClick={() => setDeleteConfirmContact(null)} className="text-gray-400"><X size={12}/></button>
-                  </div>
-                ) : (
-                  <button onClick={() => setDeleteConfirmContact(c.id)} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
-                )}
+          <div className="space-y-4 max-w-lg">
+            {/* Lookback window */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Lookback window (days)</label>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={scannerCfg.lookbackDays}
+                onChange={(e) => setScannerCfg((prev) => prev ? { ...prev, lookbackDays: parseInt(e.target.value) || 7 } : prev)}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-28 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              />
+              <p className="text-xs text-gray-400 mt-1">How many days back to scan for new notes</p>
+            </div>
+
+            {/* Auto-scan toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Auto-scan on startup</p>
+                <p className="text-xs text-gray-400">Automatically scan notes when the app loads</p>
               </div>
-            ))}
+              <button
+                type="button"
+                onClick={() => setScannerCfg((prev) => prev ? { ...prev, autoScan: !prev.autoScan } : prev)}
+                className={`text-2xl ${scannerCfg.autoScan ? 'text-indigo-600' : 'text-gray-300'}`}
+              >
+                {scannerCfg.autoScan ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+              </button>
+            </div>
+
+            {/* Include daily notes toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Include daily notes</p>
+                <p className="text-xs text-gray-400">Scan the daily notes section</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setScannerCfg((prev) => prev ? { ...prev, includeDailyNotes: !prev.includeDailyNotes } : prev)}
+                className={`text-2xl ${scannerCfg.includeDailyNotes ? 'text-indigo-600' : 'text-gray-300'}`}
+              >
+                {scannerCfg.includeDailyNotes ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+              </button>
+            </div>
+
+            {/* Include folders */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Include folders</label>
+              <div className="space-y-1.5 mb-2">
+                {scannerCfg.includeFolders.map((f) => (
+                  <div key={f} className="flex items-center gap-2">
+                    <span className="text-sm text-gray-700 flex-1">{f}</span>
+                    <button
+                      type="button"
+                      onClick={() => setScannerCfg((prev) => prev ? { ...prev, includeFolders: prev.includeFolders.filter((x) => x !== f) } : prev)}
+                      className="text-gray-400 hover:text-rose-500"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newFolderInput}
+                  onChange={(e) => setNewFolderInput(e.target.value)}
+                  placeholder="folder-slug"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newFolderInput.trim()) {
+                      setScannerCfg((prev) => prev ? { ...prev, includeFolders: [...prev.includeFolders, newFolderInput.trim()] } : prev);
+                      setNewFolderInput('');
+                    }
+                  }}
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (newFolderInput.trim()) {
+                      setScannerCfg((prev) => prev ? { ...prev, includeFolders: [...prev.includeFolders, newFolderInput.trim()] } : prev);
+                      setNewFolderInput('');
+                    }
+                  }}
+                  className="px-3 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg"
+                >
+                  Add
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Add folder slugs to scan (e.g. meeting-notes)</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSaveScannerCfg}
+              disabled={scannerSaving}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
+            >
+              {scannerSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              {scannerSaved ? 'Saved!' : 'Save Scanner Config'}
+            </button>
           </div>
         )}
       </section>

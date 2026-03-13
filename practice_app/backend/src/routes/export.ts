@@ -17,11 +17,8 @@ router.get('/matrix', async (_req: Request, res: Response) => {
 
 router.get('/timeline', async (_req: Request, res: Response) => {
   try {
-    const allocations = await prisma.allocation.findMany({
-      include: { teamMember: true },
-      orderBy: { startDate: 'asc' },
-    });
-    res.json(allocations);
+    // Allocation model has been removed; return empty array for backward compatibility
+    res.json([]);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

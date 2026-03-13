@@ -16,7 +16,7 @@ import {
   getCtxFolders, createCtxFolder, renameCtxFolder, deleteCtxFolder,
   createCtxFolderNote, getCtxFolderNote, saveCtxFolderNote,
   renameCtxFolderNote, deleteCtxFolderNote, moveCtxFolderNote,
-  getAiStatus, summariseNote,
+  getAiStatus, summariseNote, scanNote,
 } from '../api/client';
 import type { NoteListItem, NoteSearchResult, TeamMember, Folder } from '../types';
 
@@ -287,6 +287,8 @@ const Notes: React.FC = () => {
   const [summarising, setSummarising] = useState(false);
   const [summariseError, setSummariseError] = useState<string | null>(null);
   const [aiModel] = useState(() => localStorage.getItem('kaimahi_ai_model') ?? 'llama3.2:3b');
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<{ draftsCreated: number; alreadyScanned: boolean } | null>(null);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -294,6 +296,22 @@ const Notes: React.FC = () => {
   // ── Derived ───────────────────────────────────────────────────────────────
   const slug = selectedMember ? nameToSlug(selectedMember.name) : '';
   const isFolders = noteContext === 'folders';
+
+  // The noteRef that uniquely identifies the currently open note (for scan deduplication)
+  const activeNoteRef: string | null = (() => {
+    if (isFolders) {
+      if (!selectedFolderSlug || !selectedNoteSlug) return null;
+      return `folders/${selectedFolderSlug}/${selectedNoteSlug}`;
+    }
+    if (activePane === 'ctx-folder') {
+      if (!ctxFolderSlug || !ctxNoteSlug) return null;
+      if (noteContext === 'member' && slug) return `member-folders/${slug}/${ctxFolderSlug}/${ctxNoteSlug}`;
+      return `daily-folders/${ctxFolderSlug}/${ctxNoteSlug}`;
+    }
+    if (noteContext === 'daily') return `daily-notes/${selectedDate}`;
+    if (noteContext === 'member' && slug) return `member-notes/${slug}/${selectedDate}`;
+    return null;
+  })();
 
   // ── Team members ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -469,7 +487,21 @@ const Notes: React.FC = () => {
     }
   };
 
-  // ── Search ────────────────────────────────────────────────────────────────
+  // ── AI scan note for work requests ───────────────────────────────────────
+
+  const handleScanNote = async () => {
+    if (!activeContent.trim() || !activeNoteRef || scanning) return;
+    setScanning(true);
+    setScanResult(null);
+    try {
+      const result = await scanNote(activeNoteRef, activeContent, aiModel);
+      setScanResult(result);
+      // Auto-dismiss the result after 6 seconds
+      setTimeout(() => setScanResult(null), 6000);
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const handleSearchChange = (q: string) => {
     setSearch(q);
@@ -894,6 +926,37 @@ const Notes: React.FC = () => {
                       : <Sparkles size={13} />}
                     Summarise
                   </button>
+                  <button
+                    onClick={handleScanNote}
+                    disabled={scanning || !aiAvailable || !activeContent.trim() || !activeNoteRef}
+                    title={
+                      !aiAvailable
+                        ? 'Ollama not connected — configure in Settings → AI'
+                        : !activeNoteRef
+                        ? 'No note selected'
+                        : scanning
+                        ? 'Scanning…'
+                        : 'Scan this note for work requests'
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
+                               bg-amber-50 text-amber-700 hover:bg-amber-100
+                               disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    {scanning
+                      ? <Loader2 size={13} className="animate-spin" />
+                      : <Sparkles size={13} />}
+                    Scan requests
+                  </button>
+                  {scanResult && (
+                    <span className={`flex items-center gap-1 text-xs font-medium ${
+                      scanResult.alreadyScanned ? 'text-gray-500' : scanResult.draftsCreated > 0 ? 'text-green-600' : 'text-gray-500'
+                    }`}>
+                      {scanResult.alreadyScanned
+                        ? '— already scanned'
+                        : scanResult.draftsCreated > 0
+                        ? <><Check size={11} /> {scanResult.draftsCreated} draft{scanResult.draftsCreated > 1 ? 's' : ''} created</>
+                        : '— no requests found'}
+                    </span>
+                  )}
                   {summariseError && (
                     <span className="flex items-center gap-1 text-xs text-red-500 max-w-xs truncate" title={summariseError}>
                       <X size={11} className="flex-shrink-0" />

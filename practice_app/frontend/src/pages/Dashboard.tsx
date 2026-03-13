@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Users, Briefcase, Star, AlertTriangle } from 'lucide-react';
-import type { TeamMember, Allocation, SMEAssignment, MatrixEntry, Dimension, DimensionNode, AllocationTypeConfig } from '../types';
-import { getTeam, getAllocations, getSME, getMatrix, getDimensions, getAllocationTypes } from '../api/client';
+import type { TeamMember, WorkRequest, SMEAssignment, MatrixEntry, Dimension, DimensionNode, AllocationTypeConfig } from '../types';
+import { getTeam, getWorkRequests, getSME, getMatrix, getDimensions, getAllocationTypes } from '../api/client';
 
 type CoverageItem =
   | { type: 'dimension-header'; name: string }
@@ -79,7 +79,7 @@ const PRESET_COLORS: Record<string, string> = {
 
 const Dashboard: React.FC = () => {
   const [team, setTeam] = useState<TeamMember[]>([]);
-  const [allocations, setAllocations] = useState<Allocation[]>([]);
+  const [allocations, setAllocations] = useState<WorkRequest[]>([]);
   const [sme, setSme] = useState<SMEAssignment[]>([]);
   const [entries, setEntries] = useState<MatrixEntry[]>([]);
   const [dimensions, setDimensions] = useState<Dimension[]>([]);
@@ -87,7 +87,7 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getTeam(), getAllocations(), getSME(), getMatrix({}), getDimensions(), getAllocationTypes()])
+    Promise.all([getTeam(), getWorkRequests({ isAllocated: true }), getSME(), getMatrix({}), getDimensions(), getAllocationTypes()])
       .then(([t, a, s, e, d, at]) => {
         setTeam(t);
         setAllocations(a);
@@ -108,16 +108,16 @@ const Dashboard: React.FC = () => {
   const activeProjects = new Set(
     allocations
       .filter((a) => {
-        const s = new Date(a.startDate);
-        const e = new Date(a.endDate);
+        const s = new Date(a.allocationStartDate!);
+        const e = new Date(a.allocationEndDate!);
         return s <= today && e >= today;
       })
-      .map((a) => a.projectName)
+      .map((a) => a.title)
   ).size;
 
   const currentWeekAllocs = allocations.filter((a) => {
-    const s = new Date(a.startDate);
-    const e = new Date(a.endDate);
+    const s = new Date(a.allocationStartDate!);
+    const e = new Date(a.allocationEndDate!);
     return s <= weekEnd && e >= weekStart;
   });
 
@@ -179,19 +179,19 @@ const Dashboard: React.FC = () => {
         ) : (
           <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
             {currentWeekAllocs.map((a) => {
-              const member = memberById.get(a.teamMemberId);
+              const member = memberById.get(a.assigneeId ?? '');
               const isLeaving = member?.isLeaving ?? false;
               return (
                 <div key={a.id} className={`px-5 py-3 flex items-center justify-between ${isLeaving ? 'bg-amber-50' : ''}`}>
                   <div className="flex items-center gap-2">
                     {isLeaving && <AlertTriangle size={13} className="text-orange-500 flex-shrink-0" />}
-                    <span className={`font-medium ${isLeaving ? 'text-amber-800' : 'text-gray-800'}`}>{a.teamMember?.name ?? member?.name}</span>
-                    <span className="text-gray-500 text-sm">{a.projectName}</span>
+                    <span className={`font-medium ${isLeaving ? 'text-amber-800' : 'text-gray-800'}`}>{a.assignee?.name ?? member?.name}</span>
+                    <span className="text-gray-500 text-sm">{a.title}</span>
                   </div>
                   <span
-                    className={`text-xs text-white px-2 py-0.5 rounded-full ${typeColorMap[a.type] ?? typeColorMap.uncategorised}`}
+                    className={`text-xs text-white px-2 py-0.5 rounded-full ${typeColorMap[a.allocationType ?? ''] ?? typeColorMap.uncategorised}`}
                   >
-                    {typeColorMap[a.type] ? a.type : 'uncategorised'}
+                    {a.allocationType && typeColorMap[a.allocationType] ? a.allocationType : 'uncategorised'}
                   </span>
                 </div>
               );

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Sparkles, Loader2 } from 'lucide-react';
 import type {
   WorkRequest,
   Contact,
@@ -16,6 +16,7 @@ import {
   updateWorkRequest,
   getContacts,
   createContact,
+  parseRequest,
 } from '../api/client';
 
 interface Props {
@@ -78,6 +79,12 @@ const RequestForm: React.FC<Props> = ({
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Paste & parse state
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [parsePending, setParsePending] = useState(false);
+  const [parseError, setParseError] = useState('');
 
   // Contact picker
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -195,6 +202,31 @@ const RequestForm: React.FC<Props> = ({
     }
   };
 
+  const handleParse = async () => {
+    if (!pasteText.trim()) return;
+    setParsePending(true);
+    setParseError('');
+    try {
+      const model = localStorage.getItem('kaimahi_ai_model') ?? 'llama3.2:3b';
+      const result = await parseRequest(pasteText, model);
+      const s = result.suggestion;
+      setForm((prev) => ({
+        ...prev,
+        title: s.title ?? prev.title,
+        description: s.description ?? prev.description,
+        source: sources.find((src) => src.name.toLowerCase() === s.suggestedSource?.toLowerCase())?.name ?? prev.source,
+        type: types.find((t) => t.name.toLowerCase() === s.suggestedType?.toLowerCase())?.name ?? prev.type,
+        priority: priorities.find((p) => p.name.toLowerCase() === s.suggestedPriority?.toLowerCase())?.name ?? prev.priority,
+      }));
+      setPasteOpen(false);
+      setPasteText('');
+    } catch {
+      setParseError('Could not parse — please try again or fill in manually.');
+    } finally {
+      setParsePending(false);
+    }
+  };
+
   const selectedContact = contacts.find((c) => c.id === form.requestorId);
 
   if (!open) return null;
@@ -212,6 +244,47 @@ const RequestForm: React.FC<Props> = ({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* ── Paste & Parse ─────────────────────────────────────────── */}
+          {!pasteOpen ? (
+            <button
+              type="button"
+              onClick={() => setPasteOpen(true)}
+              className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium mb-3"
+            >
+              <Sparkles size={12} /> Paste &amp; Parse
+            </button>
+          ) : (
+            <div className="mb-4 border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-amber-800 flex items-center gap-1.5">
+                  <Sparkles size={12} /> Paste &amp; Parse
+                </span>
+                <button type="button" onClick={() => { setPasteOpen(false); setPasteText(''); setParseError(''); }} className="text-amber-600 hover:text-amber-800">
+                  <X size={14} />
+                </button>
+              </div>
+              <textarea
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder="Paste a Slack message, email, or note…"
+                rows={4}
+                className="w-full border border-amber-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white resize-none"
+              />
+              {parseError && <p className="text-xs text-rose-600">{parseError}</p>}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleParse}
+                  disabled={parsePending || !pasteText.trim()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-amber-600 hover:bg-amber-700 text-white rounded-lg disabled:opacity-50"
+                >
+                  {parsePending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                  Parse
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Title */}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Title <span className="text-red-500">*</span></label>

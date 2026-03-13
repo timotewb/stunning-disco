@@ -15,6 +15,7 @@ import type {
   RequestPriorityConfig,
   RequestStatusConfig,
   RequestEffortConfig,
+  RequestAnalytics,
   SMEAssignment,
   NoteListItem,
   Note,
@@ -22,6 +23,8 @@ import type {
   Folder,
   FolderNote,
   FolderNoteContent,
+  NotesScanResult,
+  ScannerConfig,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -103,6 +106,27 @@ export const createWorkRequest = (data: Partial<WorkRequest>) =>
 export const updateWorkRequest = (id: string, data: Partial<WorkRequest>) =>
   api.put<WorkRequest>(`/requests/${id}`, data).then((r) => r.data);
 export const deleteWorkRequest = (id: string) => api.delete(`/requests/${id}`);
+
+export const getRequestAnalytics = (params?: { from?: string; to?: string; groupBy?: 'week' | 'month' }) =>
+  api.get<RequestAnalytics>('/requests/analytics', { params }).then((r) => r.data);
+
+// AI Paste & Parse
+export const parseRequest = (content: string, model?: string) =>
+  api.post<{ suggestion: { title?: string; description?: string; suggestedSource?: string; suggestedType?: string; suggestedPriority?: string } }>('/requests/parse', { content, model }).then((r) => r.data);
+
+// AI Notes Scanner
+export const scanNotes = (opts?: { model?: string }) =>
+  api.post<NotesScanResult>('/requests/scan-notes', opts ?? {}).then((r) => r.data);
+
+export const scanNote = (noteRef: string, content: string, model?: string) =>
+  api.post<{ draftsCreated: number; alreadyScanned: boolean }>('/requests/scan-note', { noteRef, content, model }).then((r) => r.data);
+
+// Scanner config
+export const getScannerConfig = () =>
+  api.get<ScannerConfig>('/requests/scanner-config').then((r) => r.data);
+
+export const saveScannerConfig = (cfg: Partial<ScannerConfig>) =>
+  api.put<ScannerConfig>('/requests/scanner-config', cfg).then((r) => r.data);
 
 // Contacts
 export const getContacts = (q?: string) =>

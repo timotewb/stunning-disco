@@ -12,14 +12,14 @@ interface AiConfig {
   customUrl: string | null;
 }
 
-function getConfigPath(): string {
+export function getConfigPath(): string {
   const dbUrl = process.env.DATABASE_URL ?? 'file:/app/data/practice.db';
   const dbPath = dbUrl.replace(/^file:/, '');
   const absDb = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
   return path.join(path.dirname(absDb), 'ai-config.json');
 }
 
-function readConfig(): AiConfig {
+export function readConfig(): AiConfig {
   const p = getConfigPath();
   if (fs.existsSync(p)) {
     try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { /* fall through */ }
@@ -42,7 +42,7 @@ function hostify(url: string): string {
   return url;
 }
 
-function resolveOllamaUrl(cfg: AiConfig): string {
+export function resolveOllamaUrl(cfg: AiConfig): string {
   if (cfg.customUrl) return hostify(cfg.customUrl);
   if (cfg.mode === 'local') return 'http://host.docker.internal:11434';
   if (cfg.mode === 'docker') return 'http://ollama:11434';
@@ -53,6 +53,8 @@ function resolveOllamaUrl(cfg: AiConfig): string {
 
 export interface AiPrompts {
   noteSummarise: string;
+  requestExtract: string;
+  requestParse: string;
 }
 
 export const DEFAULT_PROMPTS: AiPrompts = {
@@ -69,13 +71,27 @@ Format your response EXACTLY as markdown like this:
 **Actions:**
 - action one (if any)
 ---`,
+  requestExtract: `You are a work request extractor. Read the following notes and identify any passages where someone describes incoming work, a request made of the team, an action item assigned to us, or a problem to solve. For each one, return a JSON object with:
+  title: string (concise, 10 words max)
+  excerpt: string (verbatim quote from the note, 200 chars max)
+  suggestedSource: one of [teams, slack, jira, asana, call, conversation, planning, email, other]
+  suggestedType: one of [feature, bug, consultation, support, infrastructure, planning, research, other]
+  suggestedPriority: one of [critical, high, medium, low]
+Return ONLY a valid JSON array of objects. If nothing qualifies, return [].`,
+  requestParse: `You are a work request parser. Extract the key information from the following text and return ONLY a single JSON object (no array, no markdown) with these exact keys:
+  title: string (concise summary, 10 words max)
+  description: string (cleaned up version of the request, 200 chars max)
+  suggestedSource: one of [teams, slack, jira, asana, call, conversation, planning, email, other]
+  suggestedType: one of [feature, bug, consultation, support, infrastructure, planning, research, other]
+  suggestedPriority: one of [critical, high, medium, low]
+Return ONLY a valid JSON object, no extra text.`,
 };
 
 function getPromptsPath(): string {
   return path.join(path.dirname(getConfigPath()), 'ai-prompts.json');
 }
 
-function readPrompts(): AiPrompts {
+export function readPrompts(): AiPrompts {
   const p = getPromptsPath();
   if (fs.existsSync(p)) {
     try {
@@ -94,7 +110,7 @@ function writePrompts(prompts: AiPrompts): void {
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
-async function ollamaPost(baseUrl: string, apiPath: string, body: unknown): Promise<unknown> {
+export async function ollamaPost(baseUrl: string, apiPath: string, body: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const url = new URL(apiPath, baseUrl);

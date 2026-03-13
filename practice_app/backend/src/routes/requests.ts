@@ -1,9 +1,245 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
+import path from 'path';
+import { getConfigPath, resolveOllamaUrl, readConfig, ollamaPost, readPrompts } from './ai';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+// ── Scanner config ────────────────────────────────────────────────────────────
+
+interface ScannerConfig {
+  lookbackDays: number;
+  autoScan: boolean;
+  includeDailyNotes: boolean;
+  includeFolders: string[];
+}
+
+const defaultScannerConfig: ScannerConfig = {
+  lookbackDays: 7,
+  autoScan: false,
+  includeDailyNotes: true,
+  includeFolders: [],
+};
+
+function getScannerConfigPath(): string {
+  const cfgPath = getConfigPath();
+  return path.join(path.dirname(cfgPath), 'scanner-config.json');
+}
+
+function readScannerConfig(): ScannerConfig {
+  const p = getScannerConfigPath();
+  if (fs.existsSync(p)) {
+    try { return { ...defaultScannerConfig, ...JSON.parse(fs.readFileSync(p, 'utf-8')) }; } catch { /* fall through */ }
+  }
+  return { ...defaultScannerConfig };
+}
+
+function writeScannerConfig(cfg: ScannerConfig): void {
+  const p = getScannerConfigPath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+}
+
+function getNotesDir(): string {
+  const dbUrl = process.env.DATABASE_URL ?? 'file:/app/data/practice.db';
+  const dbPath = dbUrl.replace(/^file:/, '');
+  const absoluteDbPath = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
+  return path.join(path.dirname(absoluteDbPath), 'notes');
+}
+
+// ── Scanner config endpoints ──────────────────────────────────────────────────
+
+router.get('/scanner-config', (_req, res) => {
+  res.json(readScannerConfig());
+});
+
+router.put('/scanner-config', (req, res) => {
+  const cfg = { ...readScannerConfig(), ...req.body };
+  writeScannerConfig(cfg);
+  res.json(cfg);
+});
+
+// ── Paste & Parse ─────────────────────────────────────────────────────────────
+
+router.post('/parse', async (req: Request, res: Response) => {
+  const { content, model = 'llama3.2:3b' } = req.body as { content: string; model?: string };
+  if (!content?.trim()) return res.status(400).json({ error: 'content required' });
+  const url = resolveOllamaUrl(readConfig());
+  const prompts = readPrompts();
+  const systemPrompt = (prompts as unknown as Record<string, string>).requestParse ?? '';
+  try {
+    const result = await ollamaPost(url, '/api/generate', {
+      model,
+      system: systemPrompt,
+      prompt: content,
+      stream: false,
+    }) as { response: string };
+    const text = result.response.trim();
+    let suggestion: Record<string, string> = {};
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) suggestion = JSON.parse(jsonMatch[0]);
+    } catch { /* ignore parse errors */ }
+    res.json({ suggestion });
+  } catch (err) {
+    res.status(502).json({ error: 'Ollama request failed: ' + String(err) });
+  }
+});
+
+// ── AI Notes Scanner ──────────────────────────────────────────────────────────
+
+router.post('/scan-notes', async (req: Request, res: Response) => {
+  const { model = 'llama3.2:3b' } = req.body as { model?: string };
+  const cfg = readScannerConfig();
+  const notesDir = getNotesDir();
+  const url = resolveOllamaUrl(readConfig());
+  const prompts = readPrompts();
+  const systemPrompt = (prompts as unknown as Record<string, string>).requestExtract ?? '';
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - cfg.lookbackDays);
+
+  const noteFiles: { noteRef: string; content: string }[] = [];
+
+  if (cfg.includeDailyNotes && fs.existsSync(notesDir)) {
+    const monthDirs = fs.readdirSync(notesDir)
+      .filter((d) => /^\d{6}$/.test(d)).sort().reverse();
+    for (const monthDir of monthDirs) {
+      const monthPath = path.join(notesDir, monthDir);
+      if (!fs.statSync(monthPath).isDirectory()) continue;
+      const files = fs.readdirSync(monthPath)
+        .filter((f) => /^\d{4}-\d{2}-\d{2}\.md$/.test(f)).sort().reverse();
+      for (const file of files) {
+        const date = file.replace('.md', '');
+        if (new Date(date) < cutoff) continue;
+        const noteRef = `daily-notes/${date}`;
+        const content = fs.readFileSync(path.join(monthPath, file), 'utf-8').trim();
+        if (content) noteFiles.push({ noteRef, content });
+      }
+    }
+  }
+
+  for (const folderSlug of cfg.includeFolders) {
+    const folderDir = path.join(notesDir, 'folders', folderSlug);
+    if (!fs.existsSync(folderDir)) continue;
+    const metaPath = path.join(folderDir, '_meta.json');
+    let noteNames: string[] = [];
+    if (fs.existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+        noteNames = Object.keys(meta.notes ?? {});
+      } catch { /* skip */ }
+    }
+    for (const slug of noteNames) {
+      const notePath = path.join(folderDir, `${slug}.md`);
+      if (!fs.existsSync(notePath)) continue;
+      const content = fs.readFileSync(notePath, 'utf-8').trim();
+      if (content) noteFiles.push({ noteRef: `folders/${folderSlug}/${slug}`, content });
+    }
+  }
+
+  let draftsCreated = 0;
+  let skippedAlreadyScanned = 0;
+
+  for (const { noteRef, content } of noteFiles) {
+    const existing = await prisma.workRequest.findFirst({ where: { noteRef } });
+    if (existing) { skippedAlreadyScanned++; continue; }
+
+    let candidates: Array<{ title?: string; excerpt?: string; suggestedSource?: string; suggestedType?: string; suggestedPriority?: string }> = [];
+    try {
+      const result = await ollamaPost(url, '/api/generate', {
+        model,
+        system: systemPrompt,
+        prompt: content,
+        stream: false,
+      }) as { response: string };
+      const text = result.response.trim();
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) candidates = JSON.parse(jsonMatch[0]);
+    } catch { /* skip this note on error */ }
+
+    for (const c of candidates) {
+      if (!c.title?.trim()) continue;
+      await prisma.workRequest.create({
+        data: {
+          id: uuidv4(),
+          title: c.title.trim().slice(0, 200),
+          description: c.excerpt?.trim() ?? undefined,
+          source: c.suggestedSource ?? 'other',
+          type: c.suggestedType ?? 'other',
+          priority: c.suggestedPriority ?? 'medium',
+          status: 'draft',
+          isDraft: true,
+          noteRef,
+          dateRaised: new Date(),
+        },
+      });
+      draftsCreated++;
+    }
+  }
+
+  res.json({ draftsCreated, skippedAlreadyScanned, notesScanned: noteFiles.length });
+});
+
+// ── Scan a single note on demand ──────────────────────────────────────────────
+
+router.post('/scan-note', async (req: Request, res: Response) => {
+  const { noteRef, content, model = 'llama3.2:3b' } = req.body as { noteRef: string; content: string; model?: string };
+  if (!noteRef?.trim()) return res.status(400).json({ error: 'noteRef required' });
+  if (!content?.trim()) return res.status(400).json({ error: 'content required' });
+
+  // Check if this note has already been scanned
+  const existing = await prisma.workRequest.findFirst({ where: { noteRef } });
+  if (existing) {
+    return res.json({ draftsCreated: 0, alreadyScanned: true });
+  }
+
+  const url = resolveOllamaUrl(readConfig());
+  const prompts = readPrompts();
+  const systemPrompt = (prompts as unknown as Record<string, string>).requestExtract ?? '';
+
+  let candidates: Array<{ title?: string; excerpt?: string; suggestedSource?: string; suggestedType?: string; suggestedPriority?: string }> = [];
+  try {
+    const result = await ollamaPost(url, '/api/generate', {
+      model,
+      system: systemPrompt,
+      prompt: content,
+      stream: false,
+    }) as { response: string };
+    const text = result.response.trim();
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (jsonMatch) candidates = JSON.parse(jsonMatch[0]);
+  } catch (err) {
+    return res.status(502).json({ error: 'Ollama request failed: ' + String(err) });
+  }
+
+  let draftsCreated = 0;
+  for (const c of candidates) {
+    if (!c.title?.trim()) continue;
+    await prisma.workRequest.create({
+      data: {
+        id: uuidv4(),
+        title: c.title.trim().slice(0, 200),
+        description: c.excerpt?.trim() ?? undefined,
+        source: c.suggestedSource ?? 'other',
+        type: c.suggestedType ?? 'other',
+        priority: c.suggestedPriority ?? 'medium',
+        status: 'draft',
+        isDraft: true,
+        noteRef,
+        dateRaised: new Date(),
+      },
+    });
+    draftsCreated++;
+  }
+
+  res.json({ draftsCreated, alreadyScanned: false });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -81,6 +317,149 @@ router.get('/', async (req: Request, res: Response) => {
     res.status(500).json({ error: String(err) });
   }
 });
+
+// ── Analytics ────────────────────────────────────────────────────────────────
+// Must be declared BEFORE /:id routes so Express doesn't confuse "analytics"
+// with a literal ID.
+
+router.get('/analytics', async (req: Request, res: Response) => {
+  try {
+    const { from, to, groupBy = 'month' } = req.query;
+
+    const where: Record<string, unknown> = {};
+    if (from || to) {
+      where.dateRaised = {};
+      if (from) (where.dateRaised as Record<string, unknown>).gte = new Date(String(from));
+      if (to)   (where.dateRaised as Record<string, unknown>).lte = new Date(String(to));
+    }
+
+    const all = await prisma.workRequest.findMany({
+      where,
+      include: { assignee: true },
+      orderBy: { dateRaised: 'asc' },
+    });
+
+    // ── 1. Volume Over Time ──────────────────────────────────────────────────
+    const periodKey = (d: Date): string => {
+      const y = d.getFullYear();
+      if (groupBy === 'week') {
+        // ISO week number
+        const start = new Date(d);
+        start.setHours(0, 0, 0, 0);
+        start.setDate(start.getDate() - start.getDay() + 1); // Monday
+        const mm = String(start.getMonth() + 1).padStart(2, '0');
+        const dd = String(start.getDate()).padStart(2, '0');
+        return `${y}-${mm}-${dd}`;
+      }
+      // month
+      return `${y}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
+
+    const volMap: Record<string, { total: number; bySource: Record<string, number>; byType: Record<string, number>; byPriority: Record<string, number> }> = {};
+    for (const r of all) {
+      const key = periodKey(new Date(r.dateRaised));
+      if (!volMap[key]) volMap[key] = { total: 0, bySource: {}, byType: {}, byPriority: {} };
+      volMap[key].total++;
+      volMap[key].bySource[r.source] = (volMap[key].bySource[r.source] ?? 0) + 1;
+      volMap[key].byType[r.type] = (volMap[key].byType[r.type] ?? 0) + 1;
+      volMap[key].byPriority[r.priority] = (volMap[key].byPriority[r.priority] ?? 0) + 1;
+    }
+    const volumeOverTime = Object.entries(volMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([period, data]) => ({ period, ...data }));
+
+    // ── 2. By Source ─────────────────────────────────────────────────────────
+    const srcMap: Record<string, number> = {};
+    for (const r of all) srcMap[r.source] = (srcMap[r.source] ?? 0) + 1;
+    const bySource = Object.entries(srcMap).map(([source, count]) => ({ source, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // ── 3. By Type ───────────────────────────────────────────────────────────
+    const typeMap: Record<string, number> = {};
+    for (const r of all) typeMap[r.type] = (typeMap[r.type] ?? 0) + 1;
+    const byType = Object.entries(typeMap).map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // ── 4. By Status ─────────────────────────────────────────────────────────
+    const statusMap: Record<string, number> = {};
+    for (const r of all) statusMap[r.status] = (statusMap[r.status] ?? 0) + 1;
+    const byStatus = Object.entries(statusMap).map(([status, count]) => ({ status, count }));
+
+    // ── 5. Assignee Load ─────────────────────────────────────────────────────
+    const inFlight = all.filter((r) => r.status === 'in-flight' && r.assigneeId);
+    const loadMap: Record<string, {
+      assigneeId: string; name: string;
+      scheduledCount: number; unscheduledCount: number; inFlightCount: number;
+      byPriority: Record<string, number>;
+      requests: { id: string; title: string; priority: string; isAllocated: boolean }[];
+    }> = {};
+    for (const r of inFlight) {
+      const aid = r.assigneeId!;
+      if (!loadMap[aid]) {
+        loadMap[aid] = {
+          assigneeId: aid,
+          name: r.assignee?.name ?? aid,
+          scheduledCount: 0,
+          unscheduledCount: 0,
+          inFlightCount: 0,
+          byPriority: {},
+          requests: [],
+        };
+      }
+      loadMap[aid].inFlightCount++;
+      loadMap[aid].byPriority[r.priority] = (loadMap[aid].byPriority[r.priority] ?? 0) + 1;
+      loadMap[aid].requests.push({ id: r.id, title: r.title, priority: r.priority, isAllocated: r.isAllocated });
+      if (r.isAllocated) loadMap[aid].scheduledCount++;
+      else loadMap[aid].unscheduledCount++;
+    }
+    const assigneeLoad = Object.values(loadMap).sort((a, b) => b.inFlightCount - a.inFlightCount);
+
+    // ── 6. Skills Pressure ───────────────────────────────────────────────────
+    const openRequests = all.filter((r) => !['resolved', 'deferred', 'rejected', 'done', 'closed'].includes(r.status));
+    const nodeCountMap: Record<string, number> = {};
+    for (const r of openRequests) {
+      let nodeIds: string[] = [];
+      try { nodeIds = JSON.parse(r.dimensionNodeIds ?? '[]'); } catch { /* skip */ }
+      for (const nid of nodeIds) {
+        nodeCountMap[nid] = (nodeCountMap[nid] ?? 0) + 1;
+      }
+    }
+    const nodeIds = Object.keys(nodeCountMap);
+    const nodes = nodeIds.length > 0
+      ? await prisma.dimensionNode.findMany({ where: { id: { in: nodeIds } } })
+      : [];
+    const skillsPressure = nodes.map((n) => ({
+      dimensionNodeId: n.id,
+      name: n.name,
+      openCount: nodeCountMap[n.id] ?? 0,
+    })).sort((a, b) => b.openCount - a.openCount);
+
+    // ── 7. Median Dwell Days ─────────────────────────────────────────────────
+    const now = new Date();
+    const dwellByStatus: Record<string, number[]> = {};
+    for (const r of all) {
+      const end = r.dateResolved ? new Date(r.dateResolved) : (r.status === 'in-flight' ? now : null);
+      if (!end) continue;
+      const days = Math.max(0, Math.floor((end.getTime() - new Date(r.dateRaised).getTime()) / 86400000));
+      if (!dwellByStatus[r.status]) dwellByStatus[r.status] = [];
+      dwellByStatus[r.status].push(days);
+    }
+    const medianDwellDays: Record<string, number> = {};
+    for (const [status, vals] of Object.entries(dwellByStatus)) {
+      const sorted = vals.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      medianDwellDays[status] = sorted.length % 2 === 0
+        ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+        : sorted[mid];
+    }
+
+    res.json({ volumeOverTime, bySource, byType, byStatus, assigneeLoad, skillsPressure, medianDwellDays });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 router.post('/', async (req: Request, res: Response) => {
   try {

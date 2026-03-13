@@ -6,7 +6,6 @@ import dimensionsRouter from './routes/dimensions';
 import dimensionNodesRouter from './routes/dimension-nodes';
 import snapshotsRouter from './routes/snapshots';
 import matrixRouter from './routes/matrix';
-import allocationsRouter from './routes/allocations';
 import allocationTypesRouter from './routes/allocationTypes';
 import seniorityConfigRouter from './routes/seniorityConfig';
 import smeRouter from './routes/sme';
@@ -47,7 +46,6 @@ app.use('/api/dimension-nodes', dimensionNodesRouter);
 app.use('/api/snapshots', snapshotsRouter);
 app.use('/api/matrix', matrixRouter);
 app.use('/api/matrix-entry', matrixRouter);
-app.use('/api/allocations', allocationsRouter); // deprecated — kept for backward compatibility
 app.use('/api/allocation-types', allocationTypesRouter);
 app.use('/api/seniority-config', seniorityConfigRouter);
 app.use('/api/sme', smeRouter);

@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Plus, Pencil, Trash2, X, Check, AlertTriangle } from 'lucide-react';
-import type { TeamMember, SeniorityConfig } from '../types';
-import { getTeam, createMember, updateMember, deleteMember, getSeniorityConfigs } from '../api/client';
+import type { TeamMember, SeniorityConfig, Contact } from '../types';
+import {
+  getTeam, createMember, updateMember, deleteMember, getSeniorityConfigs,
+  getContacts, createContact, updateContact, deleteContact,
+} from '../api/client';
 
 const PRESET_BADGE_COLORS: Record<string, string> = {
   indigo: 'bg-indigo-100 text-indigo-700',
@@ -33,6 +36,13 @@ const Team: React.FC = () => {
   const [roleSuggestions, setRoleSuggestions] = useState<string[]>([]);
   const roleInputRef = useRef<HTMLInputElement>(null);
 
+  // Contacts state
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(true);
+  const [newContact, setNewContact] = useState({ name: '', role: '', team: '', email: '' });
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const [deleteConfirmContact, setDeleteConfirmContact] = useState<string | null>(null);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -46,7 +56,12 @@ const Team: React.FC = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  const loadContacts = async () => {
+    setContactsLoading(true);
+    try { setContacts(await getContacts()); } finally { setContactsLoading(false); }
+  };
+
+  useEffect(() => { load(); loadContacts(); }, []);
 
   const seniorityBadge = (seniority: string): string => {
     const cfg = seniorityConfigs.find((s) => s.name === seniority);
@@ -129,7 +144,7 @@ const Team: React.FC = () => {
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Team</h2>
+        <h2 className="text-2xl font-bold text-gray-900">Team &amp; Contacts</h2>
         <button
           onClick={openAdd}
           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
@@ -224,7 +239,122 @@ const Team: React.FC = () => {
         </div>
       )}
 
-      {/* Modal */}
+      {/* ── Contacts ────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between mt-12 mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-800">Contact Directory</h3>
+          <p className="text-sm text-gray-500 mt-0.5">External requestors who raise work — separate from team members.</p>
+        </div>
+      </div>
+
+      {/* Add / edit contact form */}
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <input
+            value={editingContact ? editingContact.name : newContact.name}
+            onChange={(e) => editingContact
+              ? setEditingContact({ ...editingContact, name: e.target.value })
+              : setNewContact({ ...newContact, name: e.target.value })}
+            placeholder="Name *"
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <input
+            value={editingContact ? (editingContact.role ?? '') : newContact.role}
+            onChange={(e) => editingContact
+              ? setEditingContact({ ...editingContact, role: e.target.value })
+              : setNewContact({ ...newContact, role: e.target.value })}
+            placeholder="Role"
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <input
+            value={editingContact ? (editingContact.team ?? '') : newContact.team}
+            onChange={(e) => editingContact
+              ? setEditingContact({ ...editingContact, team: e.target.value })
+              : setNewContact({ ...newContact, team: e.target.value })}
+            placeholder="Team / Organisation"
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <input
+            value={editingContact ? (editingContact.email ?? '') : newContact.email}
+            onChange={(e) => editingContact
+              ? setEditingContact({ ...editingContact, email: e.target.value })
+              : setNewContact({ ...newContact, email: e.target.value })}
+            placeholder="Email (optional)"
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+        </div>
+        <div className="flex gap-2">
+          {editingContact ? (
+            <>
+              <button
+                onClick={async () => {
+                  if (!editingContact.name.trim()) return;
+                  await updateContact(editingContact.id, editingContact);
+                  setEditingContact(null);
+                  loadContacts();
+                }}
+                className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >Save</button>
+              <button
+                onClick={() => setEditingContact(null)}
+                className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
+              >Cancel</button>
+            </>
+          ) : (
+            <button
+              onClick={async () => {
+                if (!newContact.name.trim()) return;
+                await createContact(newContact);
+                setNewContact({ name: '', role: '', team: '', email: '' });
+                loadContacts();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            ><Plus size={14} /> Add Contact</button>
+          )}
+        </div>
+      </div>
+
+      {contactsLoading ? (
+        <div className="text-sm text-gray-400">Loading…</div>
+      ) : contacts.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 px-6 py-8 text-center text-sm text-gray-400">
+          No contacts yet. Add requestors above.
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+          {contacts.map((c) => (
+            <div key={c.id} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50">
+              <div className="flex-1 min-w-0">
+                <span className="font-medium text-sm text-gray-800">{c.name}</span>
+                {(c.role || c.team) && (
+                  <span className="ml-2 text-xs text-gray-400">{[c.role, c.team].filter(Boolean).join(' · ')}</span>
+                )}
+                {c.email && (
+                  <span className="ml-2 text-xs text-gray-400">{c.email}</span>
+                )}
+              </div>
+              <button onClick={() => setEditingContact(c)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100">
+                <Pencil size={13} />
+              </button>
+              {deleteConfirmContact === c.id ? (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={async () => { await deleteContact(c.id); setDeleteConfirmContact(null); loadContacts(); }}
+                    className="text-red-600 text-xs flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50"
+                  ><Check size={12} /> Confirm</button>
+                  <button onClick={() => setDeleteConfirmContact(null)} className="text-gray-400 p-1 rounded hover:bg-gray-100"><X size={12} /></button>
+                </div>
+              ) : (
+                <button onClick={() => setDeleteConfirmContact(c.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-red-50">
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Member modal ─────────────────────────────────────────────────── */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8">

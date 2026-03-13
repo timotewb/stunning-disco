@@ -21,7 +21,6 @@ model TeamMember {
   isLeaving     Boolean         @default(false)
   createdAt     DateTime        @default(now())
   matrixEntries MatrixEntry[]
-  allocations   Allocation[]
   workRequests  WorkRequest[]   @relation("RequestAssignee")
   primarySME    SMEAssignment[] @relation("PrimarySME")
   backupSME     SMEAssignment[] @relation("BackupSME")
@@ -66,17 +65,6 @@ model MatrixEntry {
   snapshot        Snapshot      @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
 
   @@unique([teamMemberId, dimensionNodeId, snapshotId])
-}
-
-model Allocation {
-  id           String     @id @default(uuid())
-  teamMemberId String
-  projectName  String
-  type         String     @default("project")
-  startDate    DateTime
-  endDate      DateTime
-  notes        String     @default("")
-  teamMember   TeamMember @relation(fields: [teamMemberId], references: [id], onDelete: Cascade)
 }
 
 model AllocationTypeConfig {

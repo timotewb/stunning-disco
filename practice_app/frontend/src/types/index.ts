@@ -135,6 +135,36 @@ export interface RequestEffortConfig {
   createdAt: string;
 }
 
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+export interface VolumePoint {
+  period: string;
+  total: number;
+  bySource: Record<string, number>;
+  byType: Record<string, number>;
+  byPriority: Record<string, number>;
+}
+
+export interface AssigneeLoadEntry {
+  assigneeId: string;
+  name: string;
+  inFlightCount: number;
+  scheduledCount: number;
+  unscheduledCount: number;
+  byPriority: Record<string, number>;
+  requests: { id: string; title: string; priority: string; isAllocated: boolean }[];
+}
+
+export interface RequestAnalytics {
+  volumeOverTime: VolumePoint[];
+  bySource: { source: string; count: number }[];
+  byType: { type: string; count: number }[];
+  byStatus: { status: string; count: number }[];
+  assigneeLoad: AssigneeLoadEntry[];
+  skillsPressure: { dimensionNodeId: string; name: string; openCount: number }[];
+  medianDwellDays: Record<string, number>;
+}
+
 export interface AllocationTypeConfig {
   id: string;
   name: string;
@@ -214,4 +244,19 @@ export interface AiStatus extends AiConfig {
 
 export interface AiPrompts {
   noteSummarise: string;
+  requestExtract: string;
+  requestParse: string;
+}
+
+export interface NotesScanResult {
+  draftsCreated: number;
+  skippedAlreadyScanned: number;
+  notesScanned: number;
+}
+
+export interface ScannerConfig {
+  lookbackDays: number;
+  autoScan: boolean;
+  includeDailyNotes: boolean;
+  includeFolders: string[];
 }

@@ -15,7 +15,7 @@ import {
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/team', icon: Users, label: 'Team' },
+  { to: '/team', icon: Users, label: 'Team & Contacts' },
   { to: '/matrices', icon: Grid3X3, label: 'Matrices' },
   { to: '/timeline', icon: CalendarRange, label: 'Timeline' },
   { to: '/requests', icon: Inbox, label: 'Requests' },
