@@ -49,6 +49,7 @@ import {
   saveScannerConfig,
   exportData,
   importData,
+  cleanupOrphanImages,
 } from '../api/client';
 import { useSnapshot } from '../context/SnapshotContext';
 
@@ -122,6 +123,8 @@ const Settings: React.FC = () => {
   const [importConfirm, setImportConfirm] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [importResult, setImportResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<{ deleted: number } | null>(null);
 
   const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
@@ -165,6 +168,17 @@ const Settings: React.FC = () => {
       setImportResult({ ok: false, msg });
     } finally {
       setImportBusy(false);
+    }
+  };
+
+  const handleCleanupImages = async () => {
+    setCleanupBusy(true);
+    setCleanupResult(null);
+    try {
+      const result = await cleanupOrphanImages();
+      setCleanupResult(result);
+    } finally {
+      setCleanupBusy(false);
     }
   };
 
@@ -513,7 +527,8 @@ const Settings: React.FC = () => {
     { group: 'AI',           icon: Sparkles,      items: [{ id: 'ai-config',           label: 'AI / Ollama'         },
                                                            { id: 'ai-prompts',          label: 'AI Prompts'          }] },
     { group: 'System',       icon: Database,      items: [{ id: 'snapshots',           label: 'Snapshots'           },
-                                                           { id: 'migration',           label: 'Data Migration'      }] },
+                                                           { id: 'migration',           label: 'Data Migration'      },
+                                                           { id: 'storage-cleanup',     label: 'Storage Clean-up'    }] },
   ] as const;
 
   return (
@@ -1603,6 +1618,37 @@ const Settings: React.FC = () => {
                 </button>
               )}
             </div>
+          )}
+        </div>
+      </section>
+      )}
+
+      {activeSection === 'storage-cleanup' && (
+      <section className="space-y-6">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-800 mb-1">Storage Clean-up</h3>
+          <p className="text-sm text-gray-500">Remove orphaned files that are no longer referenced by any note.</p>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <h4 className="text-sm font-semibold text-gray-700 mb-1">Unused Images</h4>
+          <p className="text-xs text-gray-500 mb-3">
+            Scans all notes and removes image files that are no longer referenced. Safe to run at any time.
+          </p>
+          <button
+            onClick={handleCleanupImages}
+            disabled={cleanupBusy}
+            className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg transition-colors border border-gray-300"
+          >
+            {cleanupBusy ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+            {cleanupBusy ? 'Scanning…' : 'Clean up unused images'}
+          </button>
+          {cleanupResult !== null && (
+            <p className="mt-2 text-xs text-green-700">
+              {cleanupResult.deleted === 0
+                ? 'No orphaned images found — storage is clean.'
+                : `Removed ${cleanupResult.deleted} orphaned image file${cleanupResult.deleted !== 1 ? 's' : ''}.`}
+            </p>
           )}
         </div>
       </section>

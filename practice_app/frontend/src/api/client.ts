@@ -343,3 +343,9 @@ export const exportData = async (): Promise<void> => {
 
 export const importData = (payload: object) =>
   api.post<{ success: boolean }>('/data-migration/import', payload).then((r) => r.data);
+
+export const uploadNoteImage = (base64: string, mimeType: string) =>
+  api.post<{ filename: string; url: string }>('/notes/images', { base64, mimeType }).then((r) => r.data);
+
+export const cleanupOrphanImages = () =>
+  api.post<{ deleted: number }>('/notes/images/cleanup').then((r) => r.data);

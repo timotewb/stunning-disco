@@ -118,6 +118,7 @@ const Requests: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<string[]>([]);
   const [filterAssignee, setFilterAssignee] = useState<string[]>([]);
   const [filterDraftsOnly, setFilterDraftsOnly] = useState(false);
+  const [filterHideLeave, setFilterHideLeave] = useState(false);
 
   // Delete confirm
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -178,6 +179,12 @@ const Requests: React.FC = () => {
   const filtered = useMemo(() => {
     let list = requests;
     if (filterDraftsOnly) list = list.filter((r) => r.isDraft);
+    if (filterHideLeave) {
+      const leaveTypeNames = new Set(
+        allocationTypes.filter((t) => t.name.toLowerCase().includes('leave')).map((t) => t.name)
+      );
+      list = list.filter((r) => !r.allocationType || !leaveTypeNames.has(r.allocationType));
+    }
     if (filterSource.length) list = list.filter((r) => filterSource.includes(r.source));
     if (filterType.length) list = list.filter((r) => filterType.includes(r.type));
     if (filterPriority.length) list = list.filter((r) => filterPriority.includes(r.priority));
@@ -194,7 +201,7 @@ const Requests: React.FC = () => {
       );
     }
     return list;
-  }, [requests, q, filterSource, filterType, filterPriority, filterStatus, filterAssignee, filterDraftsOnly]);
+  }, [requests, q, filterSource, filterType, filterPriority, filterStatus, filterAssignee, filterDraftsOnly, filterHideLeave, allocationTypes]);
 
   const toggleFilter = (
     val: string,
@@ -210,10 +217,11 @@ const Requests: React.FC = () => {
     setFilterStatus([]);
     setFilterAssignee([]);
     setFilterDraftsOnly(false);
+    setFilterHideLeave(false);
   };
 
   const hasFilters = q || filterSource.length || filterType.length || filterPriority.length ||
-    filterStatus.length || filterAssignee.length || filterDraftsOnly;
+    filterStatus.length || filterAssignee.length || filterDraftsOnly || filterHideLeave;
 
   const handleSaved = (saved: WorkRequest) => {
     setRequests((prev) => {
@@ -417,7 +425,17 @@ const Requests: React.FC = () => {
                 ✦ Drafts
               </button>
 
-              {/* Source */}
+              {/* Hide leave */}
+              <button
+                onClick={() => setFilterHideLeave(!filterHideLeave)}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  filterHideLeave
+                    ? 'bg-blue-100 text-blue-700 border-blue-300'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                ✕ Hide leave
+              </button>
               {sources.map((s) => (
                 <button
                   key={s.id}

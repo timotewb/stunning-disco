@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import path from 'path';
+import { getImagesDir } from './notes';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -25,7 +26,7 @@ function walkNotes(dir: string, root: string): { path: string; content: string }
       results.push(...walkNotes(full, root));
     } else if (entry.name.endsWith('.md') || entry.name === '_meta.json') {
       results.push({
-        path: path.relative(root, full).replace(/\\/g, '/'), // normalise Windows separators
+        path: path.relative(root, full).replace(/\\/g, '/'),
         content: fs.readFileSync(full, 'utf-8'),
       });
     }
@@ -33,14 +34,33 @@ function walkNotes(dir: string, root: string): { path: string; content: string }
   return results;
 }
 
+/** Walk the images directory, returning all files as base64. */
+function walkImages(dir: string): { filename: string; base64: string }[] {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => ({
+      filename: e.name,
+      base64: fs.readFileSync(path.join(dir, e.name)).toString('base64'),
+    }));
+}
+
 /** Write note files back to disk, creating parent directories as needed. */
 function restoreNotes(notes: { path: string; content: string }[], notesDir: string): void {
   for (const note of notes) {
-    // Prevent path traversal
     const resolved = path.resolve(notesDir, note.path);
-    if (!resolved.startsWith(notesDir)) continue;
+    if (!resolved.startsWith(notesDir)) continue; // prevent path traversal
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, note.content, 'utf-8');
+  }
+}
+
+/** Write image files back to the images directory. */
+function restoreImages(images: { filename: string; base64: string }[], imagesDir: string): void {
+  fs.mkdirSync(imagesDir, { recursive: true });
+  for (const img of images) {
+    const filename = path.basename(img.filename); // prevent path traversal
+    fs.writeFileSync(path.join(imagesDir, filename), Buffer.from(img.base64, 'base64'));
   }
 }
 
@@ -94,9 +114,11 @@ router.get('/export', async (_req, res) => {
     );
     const dimensionsFlat = dimensions.map(({ nodes: _nodes, ...d }) => d);
 
-    // Collect notes from the filesystem
+    // Collect notes and images from the filesystem
     const notesDir = getNotesDir();
     const notes = walkNotes(notesDir, notesDir);
+    const imagesDir = getImagesDir();
+    const images = walkImages(imagesDir);
 
     const payload = {
       version: '1.0',
@@ -112,6 +134,7 @@ router.get('/export', async (_req, res) => {
         workRequests: workRequests.length,
         contacts: contacts.length,
         notes: notes.length,
+        images: images.length,
         allocationTypes: allocationTypes.length,
         seniorityConfigs: seniorityConfigs.length,
         requestSourceConfigs: requestSourceConfigs.length,
@@ -137,6 +160,7 @@ router.get('/export', async (_req, res) => {
         requestStatusConfigs,
         requestEffortConfigs,
         notes,
+        images,
       },
     };
 
@@ -248,6 +272,9 @@ router.post('/import', async (req, res) => {
     if (Array.isArray(data.notes) && data.notes.length > 0) {
       const notesDir = getNotesDir();
       restoreNotes(data.notes, notesDir);
+    }
+    if (Array.isArray(data.images) && data.images.length > 0) {
+      restoreImages(data.images, getImagesDir());
     }
 
     res.json({ success: true });

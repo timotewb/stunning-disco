@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -377,3 +378,105 @@ router.put('/members/:slug/:date', (req, res) => {
 });
 
 export default router;
+
+// ── Image helpers ─────────────────────────────────────────────────────────────
+
+export function getImagesDir(): string {
+  const dbUrl = process.env.DATABASE_URL ?? 'file:/app/data/practice.db';
+  const dbPath = dbUrl.replace(/^file:/, '');
+  const absoluteDbPath = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
+  return path.join(path.dirname(absoluteDbPath), 'images');
+}
+
+const MIME_TO_EXT: Record<string, string> = {
+  'image/png':  '.png',
+  'image/jpeg': '.jpg',
+  'image/jpg':  '.jpg',
+  'image/gif':  '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg',
+};
+
+// POST /api/notes/images — accept a base64-encoded image, save it, return the URL
+router.post('/images', (req: Request, res: Response) => {
+  try {
+    const { base64, mimeType } = req.body as { base64?: string; mimeType?: string };
+    if (!base64 || !mimeType) return res.status(400).json({ error: 'base64 and mimeType are required' });
+
+    const ext = MIME_TO_EXT[mimeType] ?? '.png';
+    const filename = `img_${crypto.randomUUID()}${ext}`;
+    const imagesDir = getImagesDir();
+    fs.mkdirSync(imagesDir, { recursive: true });
+    fs.writeFileSync(path.join(imagesDir, filename), Buffer.from(base64, 'base64'));
+
+    res.json({ filename, url: `/api/notes/images/${filename}` });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// POST /api/notes/images/cleanup — delete image files not referenced in any note
+router.post('/images/cleanup', (_req: Request, res: Response) => {
+  try {
+    const imagesDir = getImagesDir();
+    if (!fs.existsSync(imagesDir)) return res.json({ deleted: 0 });
+
+    // Collect all image filenames on disk
+    const onDisk = new Set(fs.readdirSync(imagesDir).filter(f => /^img_/.test(f)));
+    if (onDisk.size === 0) return res.json({ deleted: 0 });
+
+    // Walk all note files and collect referenced filenames
+    const referenced = new Set<string>();
+    const imageRefRegex = /\/api\/notes\/images\/(img_[^\s)"']+)/g;
+
+    function scanDir(dir: string) {
+      if (!fs.existsSync(dir)) return;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          scanDir(fullPath);
+        } else if (entry.isFile() && entry.name.endsWith('.md')) {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          let m: RegExpExecArray | null;
+          while ((m = imageRefRegex.exec(content)) !== null) referenced.add(m[1]);
+          imageRefRegex.lastIndex = 0;
+        }
+      }
+    }
+
+    scanDir(getNotesDir());
+
+    // Delete unreferenced images
+    let deleted = 0;
+    for (const filename of onDisk) {
+      if (!referenced.has(filename)) {
+        fs.unlinkSync(path.join(imagesDir, filename));
+        deleted++;
+      }
+    }
+
+    res.json({ deleted });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// GET /api/notes/images/:filename — serve an image file
+router.get('/images/:filename', (req: Request, res: Response) => {
+  try {
+    const filename = path.basename(String(req.params.filename)); // prevent path traversal
+    const filepath = path.join(getImagesDir(), filename);
+    if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Image not found' });
+
+    const ext = path.extname(filename).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+    };
+    res.setHeader('Content-Type', mimeTypes[ext] ?? 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(fs.readFileSync(filepath));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});

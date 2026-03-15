@@ -145,10 +145,11 @@ const RequestForm: React.FC<Props> = ({
   );
 
   const handleCreateContact = async () => {
-    if (!newContactName.trim()) return;
+    const nameToCreate = (newContactName || contactSearch).trim();
+    if (!nameToCreate) return;
     setCreatingContact(true);
     try {
-      const c = await createContact({ name: newContactName.trim() });
+      const c = await createContact({ name: nameToCreate });
       setContacts((prev) => [...prev, c]);
       setForm((f) => ({ ...f, requestorId: c.id }));
       setContactSearch(c.name);

@@ -16,7 +16,7 @@ import {
   getCtxFolders, createCtxFolder, renameCtxFolder, deleteCtxFolder,
   createCtxFolderNote, getCtxFolderNote, saveCtxFolderNote,
   renameCtxFolderNote, deleteCtxFolderNote, moveCtxFolderNote,
-  getAiStatus, summariseNote, scanNote,
+  getAiStatus, summariseNote, scanNote, uploadNoteImage,
 } from '../api/client';
 import type { NoteListItem, NoteSearchResult, TeamMember, Folder } from '../types';
 
@@ -289,9 +289,11 @@ const Notes: React.FC = () => {
   const [aiModel] = useState(() => localStorage.getItem('kaimahi_ai_model') ?? 'llama3.2:3b');
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ draftsCreated: number; alreadyScanned: boolean } | null>(null);
+  const [imageUploading, setImageUploading] = useState(false);
 
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const textareaRef     = useRef<HTMLTextAreaElement>(null);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const slug = selectedMember ? nameToSlug(selectedMember.name) : '';
@@ -496,11 +498,52 @@ const Notes: React.FC = () => {
     try {
       const result = await scanNote(activeNoteRef, activeContent, aiModel);
       setScanResult(result);
-      // Auto-dismiss the result after 6 seconds
       setTimeout(() => setScanResult(null), 6000);
     } finally {
       setScanning(false);
     }
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageItem = items.find((item) => item.type.startsWith('image/'));
+    if (!imageItem) return; // not an image — let the browser handle normal paste
+
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+
+    setImageUploading(true);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const dataUrl = ev.target?.result as string;
+        const [header, base64] = dataUrl.split(',');
+        const mimeType = header.match(/:(.*?);/)?.[1] ?? 'image/png';
+
+        const { url } = await uploadNoteImage(base64, mimeType);
+
+        // Insert markdown image syntax at cursor position
+        const textarea = textareaRef.current;
+        const current = textarea
+          ? (textarea.value) // use the live DOM value for accurate cursor
+          : activeContent;
+        const start = textarea?.selectionStart ?? current.length;
+        const end   = textarea?.selectionEnd   ?? current.length;
+        const imgMd = `![screenshot](${url})`;
+        const newContent = current.slice(0, start) + imgMd + current.slice(end);
+        handleContentChange(newContent);
+        // Restore cursor after inserted text
+        setTimeout(() => {
+          if (!textarea) return;
+          textarea.selectionStart = textarea.selectionEnd = start + imgMd.length;
+          textarea.focus();
+        }, 0);
+      } finally {
+        setImageUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSearchChange = (q: string) => {
@@ -882,13 +925,18 @@ const Notes: React.FC = () => {
                   )}
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0 ml-4">
-                  <span className="text-xs w-20 text-right">
-                    {saveStatus === 'saving' && (
+                  <span className="text-xs w-28 text-right">
+                    {imageUploading && (
+                      <span className="flex items-center justify-end gap-1 text-indigo-500">
+                        <Loader2 size={11} className="animate-spin" /> Uploading…
+                      </span>
+                    )}
+                    {!imageUploading && saveStatus === 'saving' && (
                       <span className="flex items-center justify-end gap-1 text-amber-500">
                         <Loader2 size={11} className="animate-spin" /> Saving…
                       </span>
                     )}
-                    {saveStatus === 'saved' && (
+                    {!imageUploading && saveStatus === 'saved' && (
                       <span className="flex items-center justify-end gap-1 text-green-600">
                         <Check size={11} /> Saved
                       </span>
@@ -974,15 +1022,17 @@ const Notes: React.FC = () => {
                   {(mode === 'edit' || mode === 'split') && (
                     <div className={`flex flex-col ${mode === 'split' ? 'w-1/2 border-r border-gray-200' : 'w-full'}`}>
                       <textarea
+                        ref={textareaRef}
                         value={activeContent}
                         onChange={(e) => handleContentChange(e.target.value)}
+                        onPaste={handlePaste}
                         placeholder={
                           isFolders || activePane === 'ctx-folder'
                             ? `# ${rightPaneTitle}\n\nStart writing in Markdown…`
                             : `# Notes for ${selectedDate}\n\nStart writing in Markdown…`
                         }
                         spellCheck
-                        className="flex-1 w-full p-6 text-sm font-mono leading-relaxed text-gray-800 bg-white resize-none focus:outline-none"
+                        className={`flex-1 w-full p-6 text-sm font-mono leading-relaxed text-gray-800 bg-white resize-none focus:outline-none transition-opacity ${imageUploading ? 'opacity-60' : ''}`}
                       />
                     </div>
                   )}
