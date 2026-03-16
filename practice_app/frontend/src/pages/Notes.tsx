@@ -1,6 +1,41 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import mermaid from 'mermaid';
+
+mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+function MermaidDiagram({ chart }: { chart: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState<string>('');
+  const [error, setError] = useState<string>('');
+
+  useEffect(() => {
+    const id = `mermaid-${Math.random().toString(36).slice(2)}`;
+    mermaid.render(id, chart)
+      .then(({ svg: rendered }) => { setSvg(rendered); setError(''); })
+      .catch((e) => { setError(String(e?.message ?? e)); setSvg(''); });
+  }, [chart]);
+
+  if (error) {
+    return (
+      <pre className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-3 overflow-x-auto">
+        {`Mermaid error: ${error}`}
+      </pre>
+    );
+  }
+  return <div ref={ref} className="my-4 flex justify-center" dangerouslySetInnerHTML={{ __html: svg }} />;
+}
+
+const markdownComponents = {
+  code({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'> & { inline?: boolean }) {
+    const language = /language-(\w+)/.exec(className ?? '')?.[1];
+    if (language === 'mermaid') {
+      return <MermaidDiagram chart={String(children).trimEnd()} />;
+    }
+    return <code className={className} {...props}>{children}</code>;
+  },
+};
 import {
   Search, Eye, Edit3, Columns, Check, Loader2, NotebookPen, FileText,
   CalendarDays, User, FolderOpen, Folder as FolderIcon, Plus, MoreHorizontal,
@@ -1040,7 +1075,7 @@ const Notes: React.FC = () => {
                     <div className={`overflow-y-auto p-6 bg-white ${mode === 'split' ? 'w-1/2' : 'w-full'}`}>
                       {activeContent.trim() ? (
                         <div className="prose prose-sm max-w-none prose-headings:text-gray-900 prose-a:text-indigo-600">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeContent}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{activeContent}</ReactMarkdown>
                         </div>
                       ) : (
                         <p className="text-gray-400 text-sm italic">Nothing to preview yet.</p>

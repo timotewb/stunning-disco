@@ -1,11 +1,11 @@
-version: '3.8'
+version: "3.8"
 services:
   app:
     build: .
     ports:
       - "3000:3000"
     volumes:
-      - ~/practice-data:/app/data
+      - ${DATA_PATH}:/app/data
     environment:
       - DATABASE_URL=file:/app/data/practice.db
       - NODE_ENV=production
@@ -17,14 +17,14 @@ services:
 
   # ollama:
   #   image: ollama/ollama
-    # Nvidia GPU on Linux — uncomment:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+  # Nvidia GPU on Linux — uncomment:
+  # deploy:
+  #   resources:
+  #     reservations:
+  #       devices:
+  #         - driver: nvidia
+  #           count: all
+  #           capabilities: [gpu]
 #     volumes:
 #       - ollama_data:/root/.ollama
 
