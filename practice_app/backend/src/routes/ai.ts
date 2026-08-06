@@ -174,6 +174,20 @@ async function ollamaDelete(baseUrl: string, apiPath: string, body: unknown): Pr
 
 // ── Config routes ─────────────────────────────────────────────────────────────
 
+/** Returns `requested` if it exists on the Ollama server, otherwise the first available model.
+ *  Falls back to `requested` unchanged if the model list cannot be fetched. */
+export async function resolveModel(baseUrl: string, requested: string): Promise<string> {
+  try {
+    const data = await ollamaGet(baseUrl, '/api/tags') as { models: { name: string }[] };
+    const available = (data.models ?? []).map((m) => m.name);
+    if (available.length === 0) return requested;
+    return available.includes(requested) ? requested : available[0];
+  } catch {
+    return requested;
+  }
+}
+
+
 // GET /api/ai/config
 router.get('/config', (_req: Request, res: Response) => {
   const cfg = readConfig();
@@ -288,9 +302,10 @@ router.delete('/prompts/:key', (req: Request, res: Response) => {
 // POST /api/ai/summarise  { content: string, model?: string }
 // Returns { summary: string }
 router.post('/summarise', async (req: Request, res: Response) => {
-  const { content, model = 'llama3.2:3b' } = req.body as { content: string; model?: string };
+  const { content, model: requestedModel = 'llama3.2:3b' } = req.body as { content: string; model?: string };
   if (!content?.trim()) return res.status(400).json({ error: 'content required' });
   const url = resolveOllamaUrl(readConfig());
+  const model = await resolveModel(url, requestedModel);
   const date = new Date().toLocaleDateString('en', { year: 'numeric', month: 'long', day: 'numeric' });
   const systemPrompt = readPrompts().noteSummarise.replace(/\{date\}/g, date);
   try {

@@ -198,10 +198,11 @@ const Capabilities: React.FC = () => {
   useEffect(() => {
     if (!snapshotId || dimensions.length === 0) return;
     getMatrix({ snapshotId }).then((entries) => {
+      const activeTeamIds = new Set(team.filter((m) => !m.hasLeft).map((m) => m.id));
       const avgMap = new Map<string, number>();
       for (const dim of dimensions) {
         for (const node of dim.nodes) {
-          const nodeEntries = entries.filter((e) => e.dimensionNodeId === node.id);
+          const nodeEntries = entries.filter((e) => e.dimensionNodeId === node.id && activeTeamIds.has(e.teamMemberId));
           avgMap.set(
             node.id,
             nodeEntries.length > 0
@@ -212,7 +213,7 @@ const Capabilities: React.FC = () => {
       }
       setCoverageGroups(buildCoverageGroups(dimensions, avgMap));
     });
-  }, [snapshotId, dimensions]);
+  }, [snapshotId, dimensions, team]);
 
   const handleSMEChange = async (
     dimensionNodeId: string,
@@ -393,6 +394,7 @@ const SMETab: React.FC<{
     );
   }
   const teamById = new Map(team.map((m) => [m.id, m]));
+  const activeTeam = team.filter((m) => !m.hasLeft);
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <table className="w-full text-sm">
@@ -463,7 +465,7 @@ const SMETab: React.FC<{
                         className={`border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 disabled:opacity-50 ${primaryLeaving ? 'border-orange-300 bg-orange-50' : 'border-gray-200'}`}
                       >
                         <option value="">— None —</option>
-                        {team.map((m) => (
+                        {activeTeam.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}{m.isLeaving ? ' (leaving)' : ''}
                           </option>
@@ -483,7 +485,7 @@ const SMETab: React.FC<{
                         className={`border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 disabled:opacity-50 ${backupLeaving ? 'border-orange-300 bg-orange-50' : 'border-gray-200'}`}
                       >
                         <option value="">— None —</option>
-                        {team.map((m) => (
+                        {activeTeam.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}{m.isLeaving ? ' (leaving)' : ''}
                           </option>

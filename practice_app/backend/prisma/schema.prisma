@@ -19,6 +19,7 @@ model TeamMember {
   tags          String          @default("[]")
   notes         String          @default("")
   isLeaving     Boolean         @default(false)
+  hasLeft       Boolean         @default(false)
   createdAt     DateTime        @default(now())
   matrixEntries MatrixEntry[]
   workRequests  WorkRequest[]   @relation("RequestAssignee")

@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
-import { getConfigPath, resolveOllamaUrl, readConfig, ollamaPost, readPrompts } from './ai';
+import { getConfigPath, resolveOllamaUrl, readConfig, ollamaPost, readPrompts, resolveModel } from './ai';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -65,9 +65,10 @@ router.put('/scanner-config', (req, res) => {
 // ── Paste & Parse ─────────────────────────────────────────────────────────────
 
 router.post('/parse', async (req: Request, res: Response) => {
-  const { content, model = 'llama3.2:3b' } = req.body as { content: string; model?: string };
+  const { content, model: requestedModel = 'llama3.2:3b' } = req.body as { content: string; model?: string };
   if (!content?.trim()) return res.status(400).json({ error: 'content required' });
   const url = resolveOllamaUrl(readConfig());
+  const model = await resolveModel(url, requestedModel);
   const prompts = readPrompts();
   const systemPrompt = (prompts as unknown as Record<string, string>).requestParse ?? '';
   try {
@@ -92,10 +93,11 @@ router.post('/parse', async (req: Request, res: Response) => {
 // ── AI Notes Scanner ──────────────────────────────────────────────────────────
 
 router.post('/scan-notes', async (req: Request, res: Response) => {
-  const { model = 'llama3.2:3b' } = req.body as { model?: string };
+  const { model: requestedModel = 'llama3.2:3b' } = req.body as { model?: string };
   const cfg = readScannerConfig();
   const notesDir = getNotesDir();
   const url = resolveOllamaUrl(readConfig());
+  const model = await resolveModel(url, requestedModel);
   const prompts = readPrompts();
   const systemPrompt = (prompts as unknown as Record<string, string>).requestExtract ?? '';
 
@@ -187,7 +189,7 @@ router.post('/scan-notes', async (req: Request, res: Response) => {
 // ── Scan a single note on demand ──────────────────────────────────────────────
 
 router.post('/scan-note', async (req: Request, res: Response) => {
-  const { noteRef, content, model = 'llama3.2:3b' } = req.body as { noteRef: string; content: string; model?: string };
+  const { noteRef, content, model: requestedModel = 'llama3.2:3b' } = req.body as { noteRef: string; content: string; model?: string };
   if (!noteRef?.trim()) return res.status(400).json({ error: 'noteRef required' });
   if (!content?.trim()) return res.status(400).json({ error: 'content required' });
 
@@ -198,6 +200,7 @@ router.post('/scan-note', async (req: Request, res: Response) => {
   }
 
   const url = resolveOllamaUrl(readConfig());
+  const model = await resolveModel(url, requestedModel);
   const prompts = readPrompts();
   const systemPrompt = (prompts as unknown as Record<string, string>).requestExtract ?? '';
 

@@ -252,7 +252,16 @@ const Settings: React.FC = () => {
       const s = await getAiStatus();
       setAiStatus(s);
       setCustomUrl(s.customUrl ?? '');
-      if (s.connected) setModels(await getAiModels());
+      if (s.connected) {
+        const freshModels = await getAiModels();
+        setModels(freshModels);
+        const stored = localStorage.getItem('kaimahi_ai_model') ?? '';
+        if (freshModels.length > 0 && !freshModels.some((m) => m.name === stored)) {
+          const first = freshModels[0].name;
+          setActiveModel(first);
+          localStorage.setItem('kaimahi_ai_model', first);
+        }
+      }
     } finally {
       setAiChecking(false);
     }

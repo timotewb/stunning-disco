@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Plus, Pencil, Trash2, X, Check, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, AlertTriangle, UserX, UserCheck } from 'lucide-react';
 import type { TeamMember, SeniorityConfig, Contact } from '../types';
 import {
   getTeam, createMember, updateMember, deleteMember, getSeniorityConfigs,
@@ -20,7 +20,7 @@ const PRESET_BADGE_COLORS: Record<string, string> = {
   gray:   'bg-gray-100 text-gray-600',
 };
 
-const emptyForm = { name: '', role: '', seniority: '', tags: [] as string[], notes: '', isLeaving: false };
+const emptyForm = { name: '', role: '', seniority: '', tags: [] as string[], notes: '', isLeaving: false, hasLeft: false };
 
 const Team: React.FC = () => {
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -86,11 +86,25 @@ const Team: React.FC = () => {
     roleInputRef.current?.focus();
   };
 
-  const filtered = members.filter(
-    (m) =>
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      m.role.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = members
+    .filter(
+      (m) =>
+        m.name.toLowerCase().includes(search.toLowerCase()) ||
+        m.role.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      if (a.hasLeft === b.hasLeft) return a.name.localeCompare(b.name);
+      return a.hasLeft ? 1 : -1;
+    });
+
+  const handleReinstate = async (id: string) => {
+    try {
+      await updateMember(id, { hasLeft: false, isLeaving: false });
+      load();
+    } catch {
+      setError('Failed to reinstate member.');
+    }
+  };
 
   const openAdd = () => {
     setForm({ ...emptyForm, seniority: seniorityConfigs[0]?.name ?? '' });
@@ -101,7 +115,7 @@ const Team: React.FC = () => {
   };
 
   const openEdit = (m: TeamMember) => {
-    setForm({ name: m.name, role: m.role, seniority: m.seniority, tags: [...m.tags], notes: m.notes, isLeaving: m.isLeaving });
+    setForm({ name: m.name, role: m.role, seniority: m.seniority, tags: [...m.tags], notes: m.notes, isLeaving: m.isLeaving, hasLeft: m.hasLeft });
     setTagInput('');
     setRoleSuggestions([]);
     setEditingId(m.id);
@@ -176,23 +190,28 @@ const Team: React.FC = () => {
             <div className="px-6 py-8 text-center text-gray-400 text-sm">No team members found.</div>
           ) : (
             filtered.map((m) => (
-              <div key={m.id} className={`px-5 py-4 flex items-center justify-between ${m.isLeaving ? 'bg-amber-50 border-l-4 border-amber-400' : ''}`}>
+              <div key={m.id} className={`px-5 py-4 flex items-center justify-between ${m.hasLeft ? 'bg-gray-50 opacity-60' : m.isLeaving ? 'bg-amber-50 border-l-4 border-amber-400' : ''}`}>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3">
-                    <span className={`font-semibold ${m.isLeaving ? 'text-amber-800' : 'text-gray-900'}`}>{m.name}</span>
+                    <span className={`font-semibold ${m.hasLeft ? 'text-gray-400 line-through' : m.isLeaving ? 'text-amber-800' : 'text-gray-900'}`}>{m.name}</span>
                     <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${seniorityBadge(m.seniority)}`}
+                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${m.hasLeft ? 'bg-gray-100 text-gray-400' : seniorityBadge(m.seniority)}`}
                     >
                       {m.seniority || '—'}
                     </span>
-                    {m.isLeaving && (
+                    {m.hasLeft && (
+                      <span className="flex items-center gap-1 text-xs bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                        <UserX size={10} /> Left
+                      </span>
+                    )}
+                    {!m.hasLeft && m.isLeaving && (
                       <span className="flex items-center gap-1 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">
                         <AlertTriangle size={10} /> Leaving
                       </span>
                     )}
                   </div>
-                  <div className="text-sm text-gray-500 mt-0.5">{m.role}</div>
-                  {m.tags.length > 0 && (
+                  <div className={`text-sm mt-0.5 ${m.hasLeft ? 'text-gray-400' : 'text-gray-500'}`}>{m.role}</div>
+                  {!m.hasLeft && m.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {m.tags.map((t) => (
                         <span key={t} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
@@ -203,12 +222,22 @@ const Team: React.FC = () => {
                   )}
                 </div>
                 <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                  <button
-                    onClick={() => openEdit(m)}
-                    className="p-2 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
-                  >
-                    <Pencil size={15} />
-                  </button>
+                  {m.hasLeft ? (
+                    <button
+                      onClick={() => handleReinstate(m.id)}
+                      title="Reinstate to team"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 rounded-lg transition-colors"
+                    >
+                      <UserCheck size={13} /> Reinstate
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => openEdit(m)}
+                      className="p-2 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
+                    >
+                      <Pencil size={15} />
+                    </button>
+                  )}
                   {deleteConfirm === m.id ? (
                     <div className="flex items-center gap-1">
                       <button
@@ -468,6 +497,23 @@ const Team: React.FC = () => {
                 >
                   <span
                     className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${form.isLeaving ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Has left the team</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Retains all data but hides this member from stats, matrices, and charts</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, hasLeft: !f.hasLeft, isLeaving: f.hasLeft ? f.isLeaving : false }))}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${form.hasLeft ? 'bg-gray-600' : 'bg-gray-200'}`}
+                  role="switch"
+                  aria-checked={form.hasLeft}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${form.hasLeft ? 'translate-x-5' : 'translate-x-0'}`}
                   />
                 </button>
               </div>

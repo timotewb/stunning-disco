@@ -321,7 +321,7 @@ const Notes: React.FC = () => {
   const [aiAvailable, setAiAvailable] = useState(false);
   const [summarising, setSummarising] = useState(false);
   const [summariseError, setSummariseError] = useState<string | null>(null);
-  const [aiModel] = useState(() => localStorage.getItem('kaimahi_ai_model') ?? 'llama3.2:3b');
+  const getAiModel = () => localStorage.getItem('kaimahi_ai_model') ?? 'llama3.2:3b';
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ draftsCreated: number; alreadyScanned: boolean } | null>(null);
   const [imageUploading, setImageUploading] = useState(false);
@@ -362,7 +362,15 @@ const Notes: React.FC = () => {
   // ── AI availability ───────────────────────────────────────────────────────
   useEffect(() => {
     getAiStatus()
-      .then((s) => setAiAvailable(s.connected))
+      .then((s) => {
+        setAiAvailable(s.connected);
+        if (s.connected && s.models.length > 0) {
+          const stored = localStorage.getItem('kaimahi_ai_model') ?? '';
+          if (!s.models.includes(stored)) {
+            localStorage.setItem('kaimahi_ai_model', s.models[0]);
+          }
+        }
+      })
       .catch(() => setAiAvailable(false));
   }, []);
 
@@ -510,7 +518,7 @@ const Notes: React.FC = () => {
     setSummarising(true);
     setSummariseError(null);
     try {
-      const { summary } = await summariseNote(activeContent, aiModel);
+      const { summary } = await summariseNote(activeContent, getAiModel());
       const updated = summary + '\n\n' + activeContent;
       if (isFolders) setFolderContent(updated);
       else setContent(updated);
@@ -531,7 +539,7 @@ const Notes: React.FC = () => {
     setScanning(true);
     setScanResult(null);
     try {
-      const result = await scanNote(activeNoteRef, activeContent, aiModel);
+      const result = await scanNote(activeNoteRef, activeContent, getAiModel());
       setScanResult(result);
       setTimeout(() => setScanResult(null), 6000);
     } finally {

@@ -76,7 +76,7 @@ const Matrices: React.FC = () => {
   );
 
   const filteredTeam = useMemo(
-    () => team.filter((m) => m.name.toLowerCase().includes(memberFilter.toLowerCase())),
+    () => team.filter((m) => !m.hasLeft && m.name.toLowerCase().includes(memberFilter.toLowerCase())),
     [team, memberFilter]
   );
 

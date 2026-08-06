@@ -6,6 +6,7 @@ export interface TeamMember {
   tags: string[];
   notes: string;
   isLeaving: boolean;
+  hasLeft: boolean;
   createdAt: string;
 }
 

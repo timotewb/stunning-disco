@@ -105,12 +105,17 @@ const Dashboard: React.FC = () => {
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 6);
 
+  const memberById = new Map(team.map((m) => [m.id, m]));
+  const activeTeam = team.filter((m) => !m.hasLeft);
+  const leavingMembers = team.filter((m) => m.isLeaving && !m.hasLeft);
+
   const activeProjects = new Set(
     allocations
       .filter((a) => {
         const s = new Date(a.allocationStartDate!);
         const e = new Date(a.allocationEndDate!);
-        return s <= today && e >= today;
+        const assignee = memberById.get(a.assigneeId ?? '');
+        return s <= today && e >= today && !assignee?.hasLeft;
       })
       .map((a) => a.title)
   ).size;
@@ -118,14 +123,16 @@ const Dashboard: React.FC = () => {
   const currentWeekAllocs = allocations.filter((a) => {
     const s = new Date(a.allocationStartDate!);
     const e = new Date(a.allocationEndDate!);
-    return s <= weekEnd && e >= weekStart;
+    const assignee = memberById.get(a.assigneeId ?? '');
+    return s <= weekEnd && e >= weekStart && !assignee?.hasLeft;
   });
 
-  // Coverage: average skill per leaf node, grouped by dimension and parent
-  const coverageItems = buildCoverageItems(dimensions, entries);
-
-  const leavingMembers = team.filter((m) => m.isLeaving);
-  const memberById = new Map(team.map((m) => [m.id, m]));
+  // Coverage: average skill per leaf node, grouped by dimension and parent (excludes members who have left)
+  const activeEntries = entries.filter((e) => {
+    const member = memberById.get(e.teamMemberId);
+    return !member?.hasLeft;
+  });
+  const coverageItems = buildCoverageItems(dimensions, activeEntries);
 
   const typeColorMap: Record<string, string> = { uncategorised: 'bg-gray-400' };
   for (const t of allocationTypes) {
@@ -146,7 +153,7 @@ const Dashboard: React.FC = () => {
 
       {/* Stat cards */}
       <div className="grid grid-cols-4 gap-6">
-        <StatCard icon={<Users size={22} />} label="Team Size" value={team.length} />
+        <StatCard icon={<Users size={22} />} label="Team Size" value={activeTeam.length} />
         <StatCard icon={<Briefcase size={22} />} label="Active Projects" value={activeProjects} />
         <StatCard icon={<Star size={22} />} label="SME Assignments" value={sme.length} />
         <StatCard
