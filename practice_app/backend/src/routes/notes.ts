@@ -66,9 +66,44 @@ function searchInDir(notesDir: string, q: string): { date: string; snippet: stri
 
 // ── Folder helpers (parameterized) ───────────────────────────────────────────
 
+const META_FILENAME = '_meta.json';
+
+/** File extensions we can safely render in the plain-text editor/preview. */
+const TEXT_EXTENSIONS = new Set([
+  '.md', '.markdown', '.txt', '.text', '.csv', '.tsv', '.json', '.jsonl',
+  '.yml', '.yaml', '.xml', '.html', '.htm', '.css', '.scss', '.log', '.ini',
+  '.cfg', '.conf', '.toml', '.env', '.sql', '.sh', '.bash', '.zsh', '.ps1',
+  '.js', '.jsx', '.ts', '.tsx', '.py', '.rb', '.go', '.rs', '.java', '.c',
+  '.h', '.cpp', '.cs', '.php', '.pl', '.r', '.svg',
+]);
+
+/** A file is previewable/editable only when its extension is known plain text. */
+function isEditableFile(file: string): boolean {
+  return TEXT_EXTENSIONS.has(path.extname(file).toLowerCase());
+}
+
+/** Note entry as normalised in memory. `file` is the real, untouched filename. */
+interface NoteEntry {
+  name: string;
+  file: string;
+}
+
+/**
+ * Folder metadata as normalised in memory.
+ * On disk, a note value may be either the legacy `"Display Name"` string
+ * (implying a `<slug>.md` file) or the richer `{ name, file }` object used for
+ * files that were added manually and whose filename we must not change.
+ */
 interface FolderMeta {
   name: string;
-  notes: Record<string, string>; // slug → display name
+  notes: Record<string, NoteEntry>;
+}
+
+type RawNoteValue = string | { name?: string; file?: string };
+
+interface RawFolderMeta {
+  name?: string;
+  notes?: Record<string, RawNoteValue>;
 }
 
 class HttpError extends Error {
@@ -79,6 +114,7 @@ function nameToFolderSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'folder';
 }
 
+/** Note slugs stay strictly URL-safe; folder path segments are validated separately. */
 function validateFolderSlug(slug: string): boolean {
   return /^[a-z0-9_]+$/.test(slug);
 }
@@ -90,26 +126,201 @@ function uniqueSlug(base: string, exists: (s: string) => boolean): string {
   return `${base}_${i}`;
 }
 
-function readFolderMetaAt(baseDir: string, slug: string): FolderMeta {
-  const p = path.join(baseDir, slug, '_meta.json');
-  if (!fs.existsSync(p)) return { name: slug, notes: {} };
-  try { return JSON.parse(fs.readFileSync(p, 'utf-8')) as FolderMeta; } catch { return { name: slug, notes: {} }; }
+/** Turn a raw filename stem into a readable display name: `design-doc` → `Design Doc`. */
+function prettifyFileName(stem: string): string {
+  const words = stem.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!words) return stem;
+  return words.replace(/\b[a-z]/g, (c) => c.toUpperCase());
 }
 
-function writeFolderMetaAt(baseDir: string, slug: string, meta: FolderMeta): void {
-  fs.writeFileSync(path.join(baseDir, slug, '_meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
+// ── Nested folder path handling ──────────────────────────────────────────────
+//
+// A folder is addressed by its path relative to the context base directory.
+// Segments are URI-encoded and joined with `~`, e.g. `databricks~unity_catalog`.
+// Single-segment paths are byte-identical to the slugs used before nesting
+// existed, so every previously issued URL keeps working.
+
+const PATH_SEPARATOR = '~';
+
+/**
+ * Build the wire form of a folder path. Segments are URI-encoded so characters
+ * like spaces survive transport; `~` stays literal as the separator.
+ */
+function encodeFolderPath(segments: string[]): string {
+  return segments.map((s) => encodeURIComponent(s)).join(PATH_SEPARATOR);
 }
 
-function listFoldersAt(baseDir: string): { slug: string; name: string; notes: { slug: string; name: string }[] }[] {
-  if (!fs.existsSync(baseDir)) return [];
-  return fs.readdirSync(baseDir)
-    .filter((d) => fs.statSync(path.join(baseDir, d)).isDirectory() && validateFolderSlug(d))
+function assertValidSegments(segments: string[]): string[] {
+  for (const segment of segments) {
+    if (!segment || segment === '.' || segment === '..' || /[/\\\0]/.test(segment)) {
+      throw new HttpError(400, 'Invalid folder path');
+    }
+  }
+  return segments;
+}
+
+/**
+ * Split a folder path into raw directory names.
+ *
+ * Express already percent-decodes route parameters, so a path taken from the
+ * URL must NOT be decoded a second time. A path taken from a JSON body is still
+ * in its wire form and does need decoding — hence the explicit flag.
+ */
+function splitFolderPath(value: string, opts: { decodeSegments: boolean }): string[] {
+  const parts = value.split(PATH_SEPARATOR).map((s) => {
+    if (!opts.decodeSegments) return s;
+    try { return decodeURIComponent(s); } catch { throw new HttpError(400, 'Invalid folder path'); }
+  });
+  return assertValidSegments(parts);
+}
+
+/** A path param arrives already decoded by Express. */
+const pathFromParam = (value: string) => splitFolderPath(value, { decodeSegments: false });
+/** A path in a JSON body is still in its encoded wire form. */
+const pathFromBody = (value: string) => splitFolderPath(value, { decodeSegments: true });
+
+/**
+ * Resolve folder path segments to an absolute directory, guaranteeing the
+ * result stays inside `baseDir` even if a segment slips past validation.
+ */
+function resolveFolderDir(baseDir: string, segments: string[]): string {
+  const dir = path.resolve(baseDir, ...segments);
+  const root = path.resolve(baseDir);
+  if (dir !== root && !dir.startsWith(root + path.sep)) throw new HttpError(400, 'Invalid folder path');
+  return dir;
+}
+
+function requireFolderDir(baseDir: string, segments: string[], label = 'Folder'): string {
+  const dir = resolveFolderDir(baseDir, segments);
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new HttpError(404, `${label} not found`);
+  return dir;
+}
+
+// ── Folder metadata ──────────────────────────────────────────────────────────
+
+function readFolderMeta(dir: string): FolderMeta {
+  const fallbackName = path.basename(dir);
+  const metaPath = path.join(dir, META_FILENAME);
+  if (!fs.existsSync(metaPath)) return { name: fallbackName, notes: {} };
+
+  let raw: RawFolderMeta;
+  try { raw = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as RawFolderMeta; }
+  catch { return { name: fallbackName, notes: {} }; }
+
+  const notes: Record<string, NoteEntry> = {};
+  for (const [slug, value] of Object.entries(raw.notes ?? {})) {
+    if (typeof value === 'string') {
+      notes[slug] = { name: value, file: `${slug}.md` };
+    } else if (value && typeof value === 'object') {
+      // basename() ensures a hand-edited meta file can never escape the folder.
+      const file = path.basename(value.file ?? `${slug}.md`);
+      notes[slug] = { name: value.name ?? slug, file };
+    }
+  }
+  return { name: raw.name ?? fallbackName, notes };
+}
+
+function writeFolderMeta(dir: string, meta: FolderMeta): void {
+  // Entries whose file is the conventional `<slug>.md` are written back in the
+  // legacy string form so existing folders are never needlessly rewritten.
+  const notes: Record<string, RawNoteValue> = {};
+  for (const [slug, entry] of Object.entries(meta.notes)) {
+    notes[slug] = entry.file === `${slug}.md` ? entry.name : { name: entry.name, file: entry.file };
+  }
+  ensureDir(dir);
+  fs.writeFileSync(path.join(dir, META_FILENAME), JSON.stringify({ name: meta.name, notes }, null, 2), 'utf-8');
+}
+
+function noteDTOs(meta: FolderMeta): { slug: string; name: string; file: string; editable: boolean }[] {
+  return Object.entries(meta.notes).map(([slug, entry]) => ({
+    slug, name: entry.name, file: entry.file, editable: isEditableFile(entry.file),
+  }));
+}
+
+interface FolderDTO {
+  slug: string;
+  path: string;
+  name: string;
+  notes: { slug: string; name: string; file: string; editable: boolean }[];
+  children: FolderDTO[];
+}
+
+/**
+ * List folders under `baseDir` recursively. Subdirectories are read straight
+ * from disk, so a manually created nested directory appears without a refresh;
+ * only its *files* need the refresh action to be indexed into `_meta.json`.
+ */
+function listFoldersAt(baseDir: string, parentSegments: string[] = []): FolderDTO[] {
+  const dir = path.join(baseDir, ...parentSegments);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    // `~` is the path separator, so a directory containing one is not addressable.
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !e.name.includes(PATH_SEPARATOR))
+    .map((e) => e.name)
     .sort()
-    .map((slug) => {
-      const meta = readFolderMetaAt(baseDir, slug);
-      const notes = Object.entries(meta.notes).map(([s, n]) => ({ slug: s, name: n }));
-      return { slug, name: meta.name, notes };
+    .map((segment) => {
+      const segments = [...parentSegments, segment];
+      const meta = readFolderMeta(path.join(baseDir, ...segments));
+      return {
+        slug: segment,
+        path: encodeFolderPath(segments),
+        name: meta.name,
+        notes: noteDTOs(meta),
+        children: listFoldersAt(baseDir, segments),
+      };
     });
+}
+
+/**
+ * Reconcile `_meta.json` with what is actually on disk, recursing into every
+ * subfolder. Files are never renamed or moved: unknown files are indexed under
+ * a generated URL-safe slug that points at the original filename.
+ */
+function refreshFolderTree(dir: string): { added: number; removed: number; foldersAdded: number } {
+  const stats = { added: 0, removed: 0, foldersAdded: 0 };
+  const meta = readFolderMeta(dir);
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+  const filesOnDisk = new Set(
+    entries.filter((e) => e.isFile() && e.name !== META_FILENAME && !e.name.startsWith('.')).map((e) => e.name)
+  );
+
+  for (const [slug, entry] of Object.entries(meta.notes)) {
+    if (!filesOnDisk.has(entry.file)) { delete meta.notes[slug]; stats.removed++; }
+  }
+
+  const indexed = new Set(Object.values(meta.notes).map((n) => n.file));
+  for (const file of [...filesOnDisk].sort()) {
+    if (indexed.has(file)) continue;
+    const stem = path.basename(file, path.extname(file));
+    const slug = uniqueSlug(nameToFolderSlug(stem), (s) => s in meta.notes);
+    meta.notes[slug] = { name: prettifyFileName(stem), file };
+    stats.added++;
+  }
+
+  writeFolderMeta(dir, meta);
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name.includes(PATH_SEPARATOR)) continue;
+    const childDir = path.join(dir, entry.name);
+    if (!fs.existsSync(path.join(childDir, META_FILENAME))) {
+      // First time we've seen this directory — give it a readable display name.
+      writeFolderMeta(childDir, { name: prettifyFileName(entry.name), notes: {} });
+      stats.foldersAdded++;
+    }
+    const childStats = refreshFolderTree(childDir);
+    stats.added += childStats.added;
+    stats.removed += childStats.removed;
+    stats.foldersAdded += childStats.foldersAdded;
+  }
+
+  return stats;
+}
+
+/** Resolve a note slug to its absolute file path within an already-resolved folder. */
+function noteFilePath(dir: string, meta: FolderMeta, slug: string): string {
+  const entry = meta.notes[slug];
+  return path.join(dir, entry ? entry.file : `${slug}.md`);
 }
 
 /**
@@ -131,143 +342,157 @@ function registerFolderCRUD(
       }
     };
 
-  // GET prefix — list folders
+  // GET prefix — list folders (recursive)
   r.get(prefix, handle((req, res) => res.json(listFoldersAt(getBaseDir(req)))));
 
   // POST prefix — create folder
   r.post(prefix, handle((req, res) => {
-    const { name } = req.body as { name?: string };
+    const { name, parentPath } = req.body as { name?: string; parentPath?: string };
     if (!name?.trim()) throw new HttpError(400, 'name is required');
     const baseDir = getBaseDir(req);
+    const parentSegments = parentPath ? pathFromBody(parentPath) : [];
+    const parentDir = parentPath ? requireFolderDir(baseDir, parentSegments, 'Parent folder') : baseDir;
     const base = nameToFolderSlug(name.trim());
-    const slug = uniqueSlug(base, (s) => new Set(listFoldersAt(baseDir).map((f) => f.slug)).has(s));
-    ensureDir(path.join(baseDir, slug));
-    writeFolderMetaAt(baseDir, slug, { name: name.trim(), notes: {} });
-    res.status(201).json({ slug, name: name.trim(), notes: [] });
+    const slug = uniqueSlug(base, (s) => fs.existsSync(path.join(parentDir, s)));
+    const dir = path.join(parentDir, slug);
+    ensureDir(dir);
+    writeFolderMeta(dir, { name: name.trim(), notes: {} });
+    res.status(201).json({
+      slug, path: encodeFolderPath([...parentSegments, slug]), name: name.trim(), notes: [], children: [],
+    });
   }));
 
-  // PATCH prefix/:folderSlug — rename folder
-  r.patch(`${prefix}/:folderSlug`, handle((req, res) => {
-    const folderSlug = String(req.params.folderSlug);
-    if (!validateFolderSlug(folderSlug)) throw new HttpError(400, 'Invalid folder slug');
+  // POST prefix/:folderPath/refresh — reconcile _meta.json with the file system
+  r.post(`${prefix}/:folderPath/refresh`, handle((req, res) => {
     const baseDir = getBaseDir(req);
-    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const dir = requireFolderDir(baseDir, pathFromParam(String(req.params.folderPath)));
+    res.json(refreshFolderTree(dir));
+  }));
+
+  // PATCH prefix/:folderPath — rename folder
+  r.patch(`${prefix}/:folderPath`, handle((req, res) => {
+    const baseDir = getBaseDir(req);
+    const segments = pathFromParam(String(req.params.folderPath));
+    const dir = requireFolderDir(baseDir, segments);
     const { name } = req.body as { name?: string };
     if (!name?.trim()) throw new HttpError(400, 'name is required');
-    const meta = readFolderMetaAt(baseDir, folderSlug);
+    const meta = readFolderMeta(dir);
     meta.name = name.trim();
-    writeFolderMetaAt(baseDir, folderSlug, meta);
-    res.json({ slug: folderSlug, name: meta.name });
+    writeFolderMeta(dir, meta);
+    res.json({ slug: path.basename(dir), path: encodeFolderPath(segments), name: meta.name });
   }));
 
-  // DELETE prefix/:folderSlug — delete folder
-  r.delete(`${prefix}/:folderSlug`, handle((req, res) => {
-    const folderSlug = String(req.params.folderSlug);
-    if (!validateFolderSlug(folderSlug)) throw new HttpError(400, 'Invalid folder slug');
+  // DELETE prefix/:folderPath — delete folder
+  r.delete(`${prefix}/:folderPath`, handle((req, res) => {
     const baseDir = getBaseDir(req);
-    const dir = path.join(baseDir, folderSlug);
-    if (!fs.existsSync(dir)) throw new HttpError(404, 'Folder not found');
+    const dir = requireFolderDir(baseDir, pathFromParam(String(req.params.folderPath)));
     fs.rmSync(dir, { recursive: true, force: true });
     res.json({ ok: true });
   }));
 
-  // POST prefix/:folderSlug/notes — create note
-  r.post(`${prefix}/:folderSlug/notes`, handle((req, res) => {
-    const folderSlug = String(req.params.folderSlug);
-    if (!validateFolderSlug(folderSlug)) throw new HttpError(400, 'Invalid folder slug');
+  // POST prefix/:folderPath/notes — create note
+  r.post(`${prefix}/:folderPath/notes`, handle((req, res) => {
     const baseDir = getBaseDir(req);
-    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const dir = requireFolderDir(baseDir, pathFromParam(String(req.params.folderPath)));
     const { name } = req.body as { name?: string };
     if (!name?.trim()) throw new HttpError(400, 'name is required');
-    const meta = readFolderMetaAt(baseDir, folderSlug);
+    const meta = readFolderMeta(dir);
     const noteSlug = uniqueSlug(nameToFolderSlug(name.trim()), (s) => s in meta.notes);
-    meta.notes[noteSlug] = name.trim();
-    writeFolderMetaAt(baseDir, folderSlug, meta);
-    fs.writeFileSync(path.join(baseDir, folderSlug, `${noteSlug}.md`), '', 'utf-8');
-    res.status(201).json({ slug: noteSlug, name: name.trim(), content: '' });
+    meta.notes[noteSlug] = { name: name.trim(), file: `${noteSlug}.md` };
+    writeFolderMeta(dir, meta);
+    fs.writeFileSync(path.join(dir, `${noteSlug}.md`), '', 'utf-8');
+    res.status(201).json({ slug: noteSlug, name: name.trim(), file: `${noteSlug}.md`, editable: true, content: '' });
   }));
 
-  // GET prefix/:folderSlug/notes/:noteSlug — get note content
-  r.get(`${prefix}/:folderSlug/notes/:noteSlug`, handle((req, res) => {
-    const folderSlug = String(req.params.folderSlug);
+  // GET prefix/:folderPath/notes/:noteSlug — get note content
+  r.get(`${prefix}/:folderPath/notes/:noteSlug`, handle((req, res) => {
     const noteSlug = String(req.params.noteSlug);
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    if (!validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
     const baseDir = getBaseDir(req);
-    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
-    const meta = readFolderMetaAt(baseDir, folderSlug);
-    const notePath = path.join(baseDir, folderSlug, `${noteSlug}.md`);
-    const content = fs.existsSync(notePath) ? fs.readFileSync(notePath, 'utf-8') : '';
-    res.json({ slug: noteSlug, name: meta.notes[noteSlug] ?? noteSlug, content });
+    const dir = requireFolderDir(baseDir, pathFromParam(String(req.params.folderPath)));
+    const meta = readFolderMeta(dir);
+    const entry = meta.notes[noteSlug];
+    const file = entry?.file ?? `${noteSlug}.md`;
+    const editable = isEditableFile(file);
+    const notePath = noteFilePath(dir, meta, noteSlug);
+    // Binary files are never read into memory — the client renders a placeholder.
+    const content = editable && fs.existsSync(notePath) ? fs.readFileSync(notePath, 'utf-8') : '';
+    res.json({ slug: noteSlug, name: entry?.name ?? noteSlug, file, editable, content });
   }));
 
-  // PUT prefix/:folderSlug/notes/:noteSlug — save note content
-  r.put(`${prefix}/:folderSlug/notes/:noteSlug`, handle((req, res) => {
-    const folderSlug = String(req.params.folderSlug);
+  // PUT prefix/:folderPath/notes/:noteSlug — save note content
+  r.put(`${prefix}/:folderPath/notes/:noteSlug`, handle((req, res) => {
     const noteSlug = String(req.params.noteSlug);
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    if (!validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
     const baseDir = getBaseDir(req);
-    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const dir = requireFolderDir(baseDir, pathFromParam(String(req.params.folderPath)));
+    const meta = readFolderMeta(dir);
+    const entry = meta.notes[noteSlug];
+    const file = entry?.file ?? `${noteSlug}.md`;
+    if (!isEditableFile(file)) throw new HttpError(400, 'This file type cannot be edited');
     const { content = '' } = req.body as { content?: string };
-    const meta = readFolderMetaAt(baseDir, folderSlug);
-    fs.writeFileSync(path.join(baseDir, folderSlug, `${noteSlug}.md`), content, 'utf-8');
-    res.json({ slug: noteSlug, name: meta.notes[noteSlug] ?? noteSlug, content });
+    fs.writeFileSync(noteFilePath(dir, meta, noteSlug), content, 'utf-8');
+    res.json({ slug: noteSlug, name: entry?.name ?? noteSlug, file, editable: true, content });
   }));
 
-  // PATCH prefix/:folderSlug/notes/:noteSlug — rename note
-  r.patch(`${prefix}/:folderSlug/notes/:noteSlug`, handle((req, res) => {
-    const folderSlug = String(req.params.folderSlug);
+  // PATCH prefix/:folderPath/notes/:noteSlug — rename note
+  r.patch(`${prefix}/:folderPath/notes/:noteSlug`, handle((req, res) => {
     const noteSlug = String(req.params.noteSlug);
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    if (!validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
     const baseDir = getBaseDir(req);
-    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
+    const dir = requireFolderDir(baseDir, pathFromParam(String(req.params.folderPath)));
     const { name } = req.body as { name?: string };
     if (!name?.trim()) throw new HttpError(400, 'name is required');
-    const meta = readFolderMetaAt(baseDir, folderSlug);
+    const meta = readFolderMeta(dir);
     if (!(noteSlug in meta.notes)) throw new HttpError(404, 'Note not found');
-    meta.notes[noteSlug] = name.trim();
-    writeFolderMetaAt(baseDir, folderSlug, meta);
-    res.json({ slug: noteSlug, name: name.trim() });
+    meta.notes[noteSlug].name = name.trim();
+    writeFolderMeta(dir, meta);
+    res.json({ slug: noteSlug, name: name.trim(), file: meta.notes[noteSlug].file, editable: isEditableFile(meta.notes[noteSlug].file) });
   }));
 
-  // DELETE prefix/:folderSlug/notes/:noteSlug — delete note
-  r.delete(`${prefix}/:folderSlug/notes/:noteSlug`, handle((req, res) => {
-    const folderSlug = String(req.params.folderSlug);
+  // DELETE prefix/:folderPath/notes/:noteSlug — delete note
+  r.delete(`${prefix}/:folderPath/notes/:noteSlug`, handle((req, res) => {
     const noteSlug = String(req.params.noteSlug);
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    if (!validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
     const baseDir = getBaseDir(req);
-    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Folder not found');
-    const meta = readFolderMetaAt(baseDir, folderSlug);
+    const dir = requireFolderDir(baseDir, pathFromParam(String(req.params.folderPath)));
+    const meta = readFolderMeta(dir);
+    const notePath = noteFilePath(dir, meta, noteSlug);
     delete meta.notes[noteSlug];
-    writeFolderMetaAt(baseDir, folderSlug, meta);
-    const notePath = path.join(baseDir, folderSlug, `${noteSlug}.md`);
+    writeFolderMeta(dir, meta);
     if (fs.existsSync(notePath)) fs.unlinkSync(notePath);
     res.json({ ok: true });
   }));
 
-  // POST prefix/:folderSlug/notes/:noteSlug/move — move note
-  r.post(`${prefix}/:folderSlug/notes/:noteSlug/move`, handle((req, res) => {
-    const folderSlug = String(req.params.folderSlug);
+  // POST prefix/:folderPath/notes/:noteSlug/move — move note
+  r.post(`${prefix}/:folderPath/notes/:noteSlug/move`, handle((req, res) => {
+    const folderPath = String(req.params.folderPath);
     const noteSlug = String(req.params.noteSlug);
     const { targetFolderSlug } = req.body as { targetFolderSlug?: string };
-    if (!validateFolderSlug(folderSlug) || !validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
-    if (!targetFolderSlug || !validateFolderSlug(targetFolderSlug)) throw new HttpError(400, 'targetFolderSlug is required');
-    if (folderSlug === targetFolderSlug) throw new HttpError(400, 'Source and target are the same');
+    if (!validateFolderSlug(noteSlug)) throw new HttpError(400, 'Invalid slug');
+    if (!targetFolderSlug) throw new HttpError(400, 'targetFolderSlug is required');
     const baseDir = getBaseDir(req);
-    if (!fs.existsSync(path.join(baseDir, folderSlug))) throw new HttpError(404, 'Source folder not found');
-    if (!fs.existsSync(path.join(baseDir, targetFolderSlug))) throw new HttpError(404, 'Target folder not found');
-    const srcMeta = readFolderMetaAt(baseDir, folderSlug);
+    const srcDir = requireFolderDir(baseDir, pathFromParam(folderPath), 'Source folder');
+    const tgtDir = requireFolderDir(baseDir, pathFromBody(targetFolderSlug), 'Target folder');
+    if (srcDir === tgtDir) throw new HttpError(400, 'Source and target are the same');
+
+    const srcMeta = readFolderMeta(srcDir);
     if (!(noteSlug in srcMeta.notes)) throw new HttpError(404, 'Note not found');
-    const noteName = srcMeta.notes[noteSlug];
-    const tgtMeta = readFolderMetaAt(baseDir, targetFolderSlug);
+    const { name: noteName, file } = srcMeta.notes[noteSlug];
+    const srcPath = path.join(srcDir, file);
+
+    const tgtMeta = readFolderMeta(tgtDir);
     const newSlug = uniqueSlug(noteSlug, (s) => s in tgtMeta.notes);
-    const srcPath = path.join(baseDir, folderSlug, `${noteSlug}.md`);
-    const content = fs.existsSync(srcPath) ? fs.readFileSync(srcPath, 'utf-8') : '';
-    fs.writeFileSync(path.join(baseDir, targetFolderSlug, `${newSlug}.md`), content, 'utf-8');
-    tgtMeta.notes[newSlug] = noteName;
-    writeFolderMetaAt(baseDir, targetFolderSlug, tgtMeta);
+    // Preserve the original filename unless it would clobber an existing file.
+    const takenFiles = new Set(Object.values(tgtMeta.notes).map((n) => n.file));
+    const ext = path.extname(file);
+    const newFile = takenFiles.has(file) || fs.existsSync(path.join(tgtDir, file)) ? `${newSlug}${ext}` : file;
+
+    if (fs.existsSync(srcPath)) fs.renameSync(srcPath, path.join(tgtDir, newFile));
+    tgtMeta.notes[newSlug] = { name: noteName, file: newFile };
+    writeFolderMeta(tgtDir, tgtMeta);
     delete srcMeta.notes[noteSlug];
-    writeFolderMetaAt(baseDir, folderSlug, srcMeta);
-    if (fs.existsSync(srcPath)) fs.unlinkSync(srcPath);
+    writeFolderMeta(srcDir, srcMeta);
     res.json({ ok: true, newSlug, targetFolderSlug });
   }));
 }

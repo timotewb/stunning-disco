@@ -211,18 +211,33 @@ export interface NoteSearchResult {
 export interface FolderNote {
   slug: string;
   name: string;
+  /** Real filename on disk, preserved verbatim for manually added files. */
+  file: string;
+  /** False for binary/unknown file types, which can be listed but not previewed. */
+  editable: boolean;
 }
 
 export interface Folder {
   slug: string;
+  /** URI-encoded, `~`-joined path relative to the context root. */
+  path: string;
   name: string;
   notes: FolderNote[];
+  children: Folder[];
 }
 
 export interface FolderNoteContent {
   slug: string;
   name: string;
+  file: string;
+  editable: boolean;
   content: string;
+}
+
+export interface FolderRefreshResult {
+  added: number;
+  removed: number;
+  foldersAdded: number;
 }
 
 export interface OllamaModel {

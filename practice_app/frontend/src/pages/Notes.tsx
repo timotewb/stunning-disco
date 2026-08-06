@@ -40,15 +40,16 @@ import {
   Search, Eye, Edit3, Columns, Check, Loader2, NotebookPen, FileText,
   CalendarDays, User, FolderOpen, Folder as FolderIcon, Plus, MoreHorizontal,
   ChevronDown, ChevronRight, Trash2, Pencil, MoveRight, X, Sparkles,
+  RefreshCw, FileLock2,
 } from 'lucide-react';
 import {
   getNotes, getNote, saveNote, searchNotes,
   getMemberNotes, getMemberNote, saveMemberNote, searchMemberNotes,
   getTeam,
-  getFolders, createFolder, renameFolder, deleteFolder,
+  getFolders, createFolder, renameFolder, deleteFolder, refreshFolder,
   createFolderNote, getFolderNote, saveFolderNote,
   renameFolderNote, deleteFolderNote, moveFolderNote,
-  getCtxFolders, createCtxFolder, renameCtxFolder, deleteCtxFolder,
+  getCtxFolders, createCtxFolder, renameCtxFolder, deleteCtxFolder, refreshCtxFolder,
   createCtxFolderNote, getCtxFolderNote, saveCtxFolderNote,
   renameCtxFolderNote, deleteCtxFolderNote, moveCtxFolderNote,
   getAiStatus, summariseNote, scanNote, uploadNoteImage,
@@ -63,12 +64,12 @@ type ActivePane = 'date' | 'ctx-folder';
 
 type ModalKind =
   | { type: 'new-folder'; scope: 'global' | 'ctx' }
-  | { type: 'rename-folder'; scope: 'global' | 'ctx'; slug: string; currentName: string }
-  | { type: 'delete-folder'; scope: 'global' | 'ctx'; slug: string; name: string }
-  | { type: 'new-note'; scope: 'global' | 'ctx'; folderSlug: string }
-  | { type: 'rename-note'; scope: 'global' | 'ctx'; folderSlug: string; noteSlug: string; currentName: string }
-  | { type: 'delete-note'; scope: 'global' | 'ctx'; folderSlug: string; noteSlug: string; name: string }
-  | { type: 'move-note'; scope: 'global' | 'ctx'; folderSlug: string; noteSlug: string; noteName: string };
+  | { type: 'rename-folder'; scope: 'global' | 'ctx'; folderPath: string; currentName: string }
+  | { type: 'delete-folder'; scope: 'global' | 'ctx'; folderPath: string; name: string }
+  | { type: 'new-note'; scope: 'global' | 'ctx'; folderPath: string }
+  | { type: 'rename-note'; scope: 'global' | 'ctx'; folderPath: string; noteSlug: string; currentName: string }
+  | { type: 'delete-note'; scope: 'global' | 'ctx'; folderPath: string; noteSlug: string; name: string }
+  | { type: 'move-note'; scope: 'global' | 'ctx'; folderPath: string; noteSlug: string; noteName: string };
 
 function todayDate(): string {
   const d = new Date();
@@ -143,26 +144,177 @@ const SimpleModal: React.FC<SimpleModalProps> = ({
 
 // ── FolderSidebar ─────────────────────────────────────────────────────────────
 
+/** Depth-first flatten of the folder tree, used for lookups and move targets. */
+const flattenFolders = (folders: Folder[], depth = 0): { folder: Folder; depth: number }[] =>
+  folders.flatMap((folder) => [{ folder, depth }, ...flattenFolders(folder.children, depth + 1)]);
+
+const findFolder = (folders: Folder[], path: string | null): Folder | undefined =>
+  path === null ? undefined : flattenFolders(folders).find((f) => f.folder.path === path)?.folder;
+
 interface FolderSidebarProps {
   folders: Folder[];
-  expandedFolders: Set<string>;
-  selectedFolderSlug: string | null;
+  expandedFolderPaths: Set<string>;
+  selectedFolderPath: string | null;
   selectedNoteSlug: string | null;
-  onToggleFolder: (slug: string) => void;
-  onSelectNote: (folderSlug: string, noteSlug: string) => void;
+  refreshingPath: string | null;
+  onToggleFolder: (path: string) => void;
+  onSelectNote: (folderPath: string, noteSlug: string) => void;
+  onRefreshFolder: (folderPath: string, scope: 'global' | 'ctx') => void;
   onOpenModal: (modal: ModalKind) => void;
   scope: 'global' | 'ctx';
 }
 
-const FolderSidebar: React.FC<FolderSidebarProps> = ({
-  folders, expandedFolders, selectedFolderSlug, selectedNoteSlug,
-  onToggleFolder, onSelectNote, onOpenModal, scope,
-}) => {
+interface FolderRowsProps extends Omit<FolderSidebarProps, 'folders'> {
+  folders: Folder[];
+  depth: number;
+  openFolderMenu: string | null;
+  openNoteMenu: string | null;
+  setOpenFolderMenu: (v: string | null) => void;
+  setOpenNoteMenu: (v: string | null) => void;
+  closeMenus: () => void;
+}
+
+const FolderRows: React.FC<FolderRowsProps> = ({
+  folders, depth, expandedFolderPaths, selectedFolderPath, selectedNoteSlug, refreshingPath,
+  onToggleFolder, onSelectNote, onRefreshFolder, onOpenModal, scope,
+  openFolderMenu, openNoteMenu, setOpenFolderMenu, setOpenNoteMenu, closeMenus,
+}) => (
+  <>
+    {folders.map((folder) => {
+      const isExpanded = expandedFolderPaths.has(folder.path);
+      const isRefreshing = refreshingPath === folder.path;
+      return (
+        <div key={folder.path} className="mb-1">
+          {/* Folder row */}
+          <div className="flex items-center gap-1 group rounded-lg hover:bg-gray-50 pr-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleFolder(folder.path); }}
+              className="flex items-center gap-1.5 flex-1 px-2 py-1.5 text-sm font-medium text-gray-700 min-w-0"
+              style={{ paddingLeft: 8 + depth * 10 }}
+            >
+              {isExpanded
+                ? <ChevronDown size={12} className="flex-shrink-0 text-gray-400" />
+                : <ChevronRight size={12} className="flex-shrink-0 text-gray-400" />}
+              {isExpanded
+                ? <FolderOpen size={13} className="flex-shrink-0 text-indigo-500" />
+                : <FolderIcon size={13} className="flex-shrink-0 text-gray-400" />}
+              <span className="truncate">{folder.name}</span>
+              {isRefreshing && <RefreshCw size={11} className="flex-shrink-0 text-indigo-500 animate-spin" />}
+            </button>
+            <div className="relative flex-shrink-0">
+              <button
+                onClick={(e) => { e.stopPropagation(); setOpenFolderMenu(openFolderMenu === folder.path ? null : folder.path); setOpenNoteMenu(null); }}
+                className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100"
+              >
+                <MoreHorizontal size={13} />
+              </button>
+              {openFolderMenu === folder.path && (
+                <div className="absolute right-0 top-6 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-44" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => { closeMenus(); onRefreshFolder(folder.path, scope); }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                    <RefreshCw size={12} /> Refresh file list
+                  </button>
+                  <button onClick={() => { closeMenus(); onOpenModal({ type: 'rename-folder', scope, folderPath: folder.path, currentName: folder.name }); }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                    <Pencil size={12} /> Rename
+                  </button>
+                  <button onClick={() => { closeMenus(); onOpenModal({ type: 'new-note', scope, folderPath: folder.path }); }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                    <Plus size={12} /> New Note
+                  </button>
+                  <div className="border-t border-gray-100 my-1" />
+                  <button onClick={() => { closeMenus(); onOpenModal({ type: 'delete-folder', scope, folderPath: folder.path, name: folder.name }); }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">
+                    <Trash2 size={12} /> Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+          {/* Subfolders and notes */}
+          {isExpanded && (
+            <div className="ml-5 border-l border-gray-100 pl-2">
+              <FolderRows
+                folders={folder.children}
+                depth={depth + 1}
+                expandedFolderPaths={expandedFolderPaths}
+                selectedFolderPath={selectedFolderPath}
+                selectedNoteSlug={selectedNoteSlug}
+                refreshingPath={refreshingPath}
+                onToggleFolder={onToggleFolder}
+                onSelectNote={onSelectNote}
+                onRefreshFolder={onRefreshFolder}
+                onOpenModal={onOpenModal}
+                scope={scope}
+                openFolderMenu={openFolderMenu}
+                openNoteMenu={openNoteMenu}
+                setOpenFolderMenu={setOpenFolderMenu}
+                setOpenNoteMenu={setOpenNoteMenu}
+                closeMenus={closeMenus}
+              />
+              {folder.notes.map((note) => {
+                const isSelected = selectedFolderPath === folder.path && selectedNoteSlug === note.slug;
+                const menuKey = `${folder.path}::${note.slug}`;
+                return (
+                  <div key={note.slug} className="flex items-center gap-1 group rounded-lg hover:bg-gray-50 pr-1">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onSelectNote(folder.path, note.slug); }}
+                      title={note.editable ? note.file : `${note.file} — preview not available`}
+                      className={`flex items-center gap-1.5 flex-1 px-2 py-1.5 text-sm min-w-0 ${isSelected ? 'text-indigo-700 font-medium' : 'text-gray-700'}`}
+                    >
+                      {note.editable
+                        ? <FileText size={11} className="flex-shrink-0 opacity-50" />
+                        : <FileLock2 size={11} className="flex-shrink-0 text-amber-500" />}
+                      <span className="truncate">{note.name}</span>
+                    </button>
+                    <div className="relative flex-shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setOpenNoteMenu(openNoteMenu === menuKey ? null : menuKey); setOpenFolderMenu(null); }}
+                        className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100"
+                      >
+                        <MoreHorizontal size={12} />
+                      </button>
+                      {openNoteMenu === menuKey && (
+                        <div className="absolute right-0 top-6 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-36" onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => { closeMenus(); onOpenModal({ type: 'rename-note', scope, folderPath: folder.path, noteSlug: note.slug, currentName: note.name }); }}
+                            className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                            <Pencil size={12} /> Rename
+                          </button>
+                          <button onClick={() => { closeMenus(); onOpenModal({ type: 'move-note', scope, folderPath: folder.path, noteSlug: note.slug, noteName: note.name }); }}
+                            className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                            <MoveRight size={12} /> Move to…
+                          </button>
+                          <div className="border-t border-gray-100 my-1" />
+                          <button onClick={() => { closeMenus(); onOpenModal({ type: 'delete-note', scope, folderPath: folder.path, noteSlug: note.slug, name: note.name }); }}
+                            className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">
+                            <Trash2 size={12} /> Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              <button
+                onClick={(e) => { e.stopPropagation(); onOpenModal({ type: 'new-note', scope, folderPath: folder.path }); }}
+                className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
+              >
+                <Plus size={11} /> New note
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    })}
+  </>
+);
+
+const FolderSidebar: React.FC<FolderSidebarProps> = (props) => {
   const [folderMenu, setFolderMenu] = useState<string | null>(null);
   const [noteMenu, setNoteMenu] = useState<string | null>(null);
   const closeMenus = () => { setFolderMenu(null); setNoteMenu(null); };
 
-  if (folders.length === 0) {
+  if (props.folders.length === 0) {
     return (
       <div className="text-xs text-gray-400 px-2 py-4 text-center leading-relaxed">
         No folders yet.<br />Click <strong>+ New Folder</strong> to start.
@@ -172,104 +324,15 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
 
   return (
     <div onClick={closeMenus}>
-      {folders.map((folder) => {
-        const isExpanded = expandedFolders.has(folder.slug);
-        return (
-          <div key={folder.slug} className="mb-1">
-            {/* Folder row */}
-            <div className="flex items-center gap-1 group rounded-lg hover:bg-gray-50 pr-1">
-              <button
-                onClick={(e) => { e.stopPropagation(); onToggleFolder(folder.slug); }}
-                className="flex items-center gap-1.5 flex-1 px-2 py-1.5 text-sm font-medium text-gray-700 min-w-0"
-              >
-                {isExpanded
-                  ? <ChevronDown size={12} className="flex-shrink-0 text-gray-400" />
-                  : <ChevronRight size={12} className="flex-shrink-0 text-gray-400" />}
-                {isExpanded
-                  ? <FolderOpen size={13} className="flex-shrink-0 text-indigo-500" />
-                  : <FolderIcon size={13} className="flex-shrink-0 text-gray-400" />}
-                <span className="truncate">{folder.name}</span>
-              </button>
-              <div className="relative flex-shrink-0">
-                <button
-                  onClick={(e) => { e.stopPropagation(); setFolderMenu(folderMenu === folder.slug ? null : folder.slug); setNoteMenu(null); }}
-                  className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100"
-                >
-                  <MoreHorizontal size={13} />
-                </button>
-                {folderMenu === folder.slug && (
-                  <div className="absolute right-0 top-6 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-36" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => { closeMenus(); onOpenModal({ type: 'rename-folder', scope, slug: folder.slug, currentName: folder.name }); }}
-                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                      <Pencil size={12} /> Rename
-                    </button>
-                    <button onClick={() => { closeMenus(); onOpenModal({ type: 'new-note', scope, folderSlug: folder.slug }); }}
-                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                      <Plus size={12} /> New Note
-                    </button>
-                    <div className="border-t border-gray-100 my-1" />
-                    <button onClick={() => { closeMenus(); onOpenModal({ type: 'delete-folder', scope, slug: folder.slug, name: folder.name }); }}
-                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">
-                      <Trash2 size={12} /> Delete
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-            {/* Notes inside folder */}
-            {isExpanded && (
-              <div className="ml-5 border-l border-gray-100 pl-2">
-                {folder.notes.map((note) => {
-                  const isSelected = selectedFolderSlug === folder.slug && selectedNoteSlug === note.slug;
-                  const menuKey = `${folder.slug}::${note.slug}`;
-                  return (
-                    <div key={note.slug} className="flex items-center gap-1 group rounded-lg hover:bg-gray-50 pr-1">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onSelectNote(folder.slug, note.slug); }}
-                        className={`flex items-center gap-1.5 flex-1 px-2 py-1.5 text-sm min-w-0 ${isSelected ? 'text-indigo-700 font-medium' : 'text-gray-700'}`}
-                      >
-                        <FileText size={11} className="flex-shrink-0 opacity-50" />
-                        <span className="truncate">{note.name}</span>
-                      </button>
-                      <div className="relative flex-shrink-0">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setNoteMenu(noteMenu === menuKey ? null : menuKey); setFolderMenu(null); }}
-                          className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100"
-                        >
-                          <MoreHorizontal size={12} />
-                        </button>
-                        {noteMenu === menuKey && (
-                          <div className="absolute right-0 top-6 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-36" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => { closeMenus(); onOpenModal({ type: 'rename-note', scope, folderSlug: folder.slug, noteSlug: note.slug, currentName: note.name }); }}
-                              className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                              <Pencil size={12} /> Rename
-                            </button>
-                            <button onClick={() => { closeMenus(); onOpenModal({ type: 'move-note', scope, folderSlug: folder.slug, noteSlug: note.slug, noteName: note.name }); }}
-                              className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                              <MoveRight size={12} /> Move to…
-                            </button>
-                            <div className="border-t border-gray-100 my-1" />
-                            <button onClick={() => { closeMenus(); onOpenModal({ type: 'delete-note', scope, folderSlug: folder.slug, noteSlug: note.slug, name: note.name }); }}
-                              className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">
-                              <Trash2 size={12} /> Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-                <button
-                  onClick={(e) => { e.stopPropagation(); onOpenModal({ type: 'new-note', scope, folderSlug: folder.slug }); }}
-                  className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
-                >
-                  <Plus size={11} /> New note
-                </button>
-              </div>
-            )}
-          </div>
-        );
-      })}
+      <FolderRows
+        {...props}
+        depth={0}
+        openFolderMenu={folderMenu}
+        openNoteMenu={noteMenu}
+        setOpenFolderMenu={setFolderMenu}
+        setOpenNoteMenu={setNoteMenu}
+        closeMenus={closeMenus}
+      />
     </div>
   );
 };
@@ -289,18 +352,25 @@ const Notes: React.FC = () => {
 
   // ── Context-folder state (inline folders in daily/member sidebars) ────────
   const [ctxFolders, setCtxFolders] = useState<Folder[]>([]);
-  const [expandedCtxFolders, setExpandedCtxFolders] = useState<Set<string>>(new Set());
-  const [ctxFolderSlug, setCtxFolderSlug] = useState<string | null>(null);
+  const [expandedCtxFolderPaths, setExpandedCtxFolderPaths] = useState<Set<string>>(new Set());
+  const [ctxFolderPath, setCtxFolderPath] = useState<string | null>(null);
   const [ctxNoteSlug, setCtxNoteSlug] = useState<string | null>(null);
   const [ctxNoteName, setCtxNoteName] = useState('');
+
+  // ── Folder refresh state (scan disk → rebuild _meta.json) ─────────────────
+  const [refreshingPath, setRefreshingPath] = useState<string | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  /** False when the open note is a binary/unknown file type that cannot be previewed. */
+  const [noteEditable, setNoteEditable] = useState(true);
+  const [noteFileName, setNoteFileName] = useState('');
 
   // ── Month group collapse state ────────────────────────────────────────────
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set(['all'])); // 'all' sentinel = all expanded initially
 
   // ── Global folders tab state ──────────────────────────────────────────────
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
-  const [selectedFolderSlug, setSelectedFolderSlug] = useState<string | null>(null);
+  const [expandedFolderPaths, setExpandedFolderPaths] = useState<Set<string>>(new Set());
+  const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null);
   const [selectedNoteSlug, setSelectedNoteSlug] = useState<string | null>(null);
   const [selectedNoteName, setSelectedNoteName] = useState<string>('');
   const [folderContent, setFolderContent] = useState('');
@@ -337,13 +407,13 @@ const Notes: React.FC = () => {
   // The noteRef that uniquely identifies the currently open note (for scan deduplication)
   const activeNoteRef: string | null = (() => {
     if (isFolders) {
-      if (!selectedFolderSlug || !selectedNoteSlug) return null;
-      return `folders/${selectedFolderSlug}/${selectedNoteSlug}`;
+      if (!selectedFolderPath || !selectedNoteSlug) return null;
+      return `folders/${selectedFolderPath}/${selectedNoteSlug}`;
     }
     if (activePane === 'ctx-folder') {
-      if (!ctxFolderSlug || !ctxNoteSlug) return null;
-      if (noteContext === 'member' && slug) return `member-folders/${slug}/${ctxFolderSlug}/${ctxNoteSlug}`;
-      return `daily-folders/${ctxFolderSlug}/${ctxNoteSlug}`;
+      if (!ctxFolderPath || !ctxNoteSlug) return null;
+      if (noteContext === 'member' && slug) return `member-folders/${slug}/${ctxFolderPath}/${ctxNoteSlug}`;
+      return `daily-folders/${ctxFolderPath}/${ctxNoteSlug}`;
     }
     if (noteContext === 'daily') return `daily-notes/${selectedDate}`;
     if (noteContext === 'member' && slug) return `member-notes/${slug}/${selectedDate}`;
@@ -390,17 +460,19 @@ const Notes: React.FC = () => {
     if (noteContext !== 'folders') refreshCtxFolders();
   }, [noteContext, slug]);
 
-  const handleSelectCtxNote = useCallback(async (folderSlug: string, noteSlug: string) => {
+  const handleSelectCtxNote = useCallback(async (folderPath: string, noteSlug: string) => {
     setLoading(true);
-    setCtxFolderSlug(folderSlug);
+    setCtxFolderPath(folderPath);
     setCtxNoteSlug(noteSlug);
     setActivePane('ctx-folder');
     setSaveStatus('idle');
     try {
       const ctx = noteContext as 'daily' | 'member';
-      const note = await getCtxFolderNote(ctx, folderSlug, noteSlug, ctx === 'member' ? slug : undefined);
+      const note = await getCtxFolderNote(ctx, folderPath, noteSlug, ctx === 'member' ? slug : undefined);
       setContent(note.content);
       setCtxNoteName(note.name);
+      setNoteEditable(note.editable);
+      setNoteFileName(note.file);
     } finally {
       setLoading(false);
     }
@@ -418,19 +490,62 @@ const Notes: React.FC = () => {
     if (noteContext === 'folders') refreshFolders();
   }, [noteContext]);
 
-  const handleSelectGlobalNote = useCallback(async (folderSlug: string, noteSlug: string) => {
+  const handleSelectGlobalNote = useCallback(async (folderPath: string, noteSlug: string) => {
     setLoading(true);
-    setSelectedFolderSlug(folderSlug);
+    setSelectedFolderPath(folderPath);
     setSelectedNoteSlug(noteSlug);
     setSaveStatus('idle');
     try {
-      const note = await getFolderNote(folderSlug, noteSlug);
+      const note = await getFolderNote(folderPath, noteSlug);
       setFolderContent(note.content);
       setSelectedNoteName(note.name);
+      setNoteEditable(note.editable);
+      setNoteFileName(note.file);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // ── Folder refresh ────────────────────────────────────────────────────────
+
+  /**
+   * Rebuild a folder's `_meta.json` from what is actually on disk, including
+   * every nested subfolder, then reload the tree so new files appear.
+   */
+  const handleRefreshFolder = useCallback(async (folderPath: string, scope: 'global' | 'ctx') => {
+    setRefreshingPath(folderPath);
+    setRefreshMessage(null);
+    try {
+      const result = scope === 'global'
+        ? await refreshFolder(folderPath)
+        : await refreshCtxFolder(
+            noteContext as 'daily' | 'member',
+            folderPath,
+            noteContext === 'member' ? slug : undefined,
+          );
+      if (scope === 'global') await refreshFolders();
+      else await refreshCtxFolders();
+
+      const parts: string[] = [];
+      if (result.added) parts.push(`${result.added} file${result.added > 1 ? 's' : ''} added`);
+      if (result.removed) parts.push(`${result.removed} removed`);
+      if (result.foldersAdded) parts.push(`${result.foldersAdded} folder${result.foldersAdded > 1 ? 's' : ''} indexed`);
+      setRefreshMessage(parts.length ? parts.join(', ') : 'Already up to date');
+      // Expand so newly indexed files are immediately visible.
+      const expand = scope === 'global' ? setExpandedFolderPaths : setExpandedCtxFolderPaths;
+      expand((p) => new Set([...p, folderPath]));
+    } catch {
+      setRefreshMessage('Refresh failed');
+    } finally {
+      setRefreshingPath(null);
+    }
+  }, [noteContext, slug, refreshFolders, refreshCtxFolders]);
+
+  useEffect(() => {
+    if (!refreshMessage) return;
+    const t = setTimeout(() => setRefreshMessage(null), 4000);
+    return () => clearTimeout(t);
+  }, [refreshMessage]);
 
   // ── Date note helpers ─────────────────────────────────────────────────────
 
@@ -461,7 +576,7 @@ const Notes: React.FC = () => {
   useEffect(() => {
     if (noteContext !== 'folders') {
       setActivePane('date');
-      setCtxFolderSlug(null);
+      setCtxFolderPath(null);
       setCtxNoteSlug(null);
       refreshList();
       loadDateNote(todayDate());
@@ -490,11 +605,11 @@ const Notes: React.FC = () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       // isFolders must be checked first — activePane stays 'date' in folders mode
-      if (isFolders && selectedFolderSlug && selectedNoteSlug) {
-        await saveFolderNote(selectedFolderSlug, selectedNoteSlug, val);
-      } else if (activePane === 'ctx-folder' && ctxFolderSlug && ctxNoteSlug) {
+      if (isFolders && selectedFolderPath && selectedNoteSlug) {
+        await saveFolderNote(selectedFolderPath, selectedNoteSlug, val);
+      } else if (activePane === 'ctx-folder' && ctxFolderPath && ctxNoteSlug) {
         const ctx = noteContext as 'daily' | 'member';
-        await saveCtxFolderNote(ctx, ctxFolderSlug, ctxNoteSlug, val, ctx === 'member' ? slug : undefined);
+        await saveCtxFolderNote(ctx, ctxFolderPath, ctxNoteSlug, val, ctx === 'member' ? slug : undefined);
       } else if (activePane === 'date') {
         if (noteContext === 'daily') await saveNote(selectedDate, val);
         else if (noteContext === 'member' && slug) await saveMemberNote(slug, selectedDate, val);
@@ -611,9 +726,9 @@ const Notes: React.FC = () => {
       m.type === 'rename-note' ? m.currentName : ''
     );
     if (m.type === 'move-note') {
-      const pool = m.scope === 'global' ? folders : ctxFolders;
-      const others = pool.filter((f) => f.slug !== m.folderSlug);
-      setModalMoveTarget(others[0]?.slug ?? '');
+      const pool = flattenFolders(m.scope === 'global' ? folders : ctxFolders);
+      const others = pool.filter((f) => f.folder.path !== m.folderPath);
+      setModalMoveTarget(others[0]?.folder.path ?? '');
     }
     setModal(m);
   };
@@ -636,42 +751,49 @@ const Notes: React.FC = () => {
 
       } else if (modal.type === 'rename-folder') {
         if (!modalInput.trim()) return;
-        if (isCtx) await renameCtxFolder(ctx, modal.slug, modalInput.trim(), memberSlug);
-        else await renameFolder(modal.slug, modalInput.trim());
+        if (isCtx) await renameCtxFolder(ctx, modal.folderPath, modalInput.trim(), memberSlug);
+        else await renameFolder(modal.folderPath, modalInput.trim());
         isCtx ? await refreshCtxFolders() : await refreshFolders();
 
       } else if (modal.type === 'delete-folder') {
+        // Deleting a folder removes its whole subtree, so drop descendant paths too.
+        const isInside = (p: string) => p === modal.folderPath || p.startsWith(`${modal.folderPath}~`);
+        const pruneExpanded = (p: Set<string>) => new Set([...p].filter((v) => !isInside(v)));
         if (isCtx) {
-          await deleteCtxFolder(ctx, modal.slug, memberSlug);
-          if (ctxFolderSlug === modal.slug) { setCtxFolderSlug(null); setCtxNoteSlug(null); setContent(''); setCtxNoteName(''); setActivePane('date'); }
-          setExpandedCtxFolders((p) => { const s = new Set(p); s.delete(modal.slug); return s; });
+          await deleteCtxFolder(ctx, modal.folderPath, memberSlug);
+          if (ctxFolderPath && isInside(ctxFolderPath)) { setCtxFolderPath(null); setCtxNoteSlug(null); setContent(''); setCtxNoteName(''); setActivePane('date'); }
+          setExpandedCtxFolderPaths(pruneExpanded);
           await refreshCtxFolders();
         } else {
-          await deleteFolder(modal.slug);
-          if (selectedFolderSlug === modal.slug) { setSelectedFolderSlug(null); setSelectedNoteSlug(null); setFolderContent(''); setSelectedNoteName(''); }
-          setExpandedFolders((p) => { const s = new Set(p); s.delete(modal.slug); return s; });
+          await deleteFolder(modal.folderPath);
+          if (selectedFolderPath && isInside(selectedFolderPath)) { setSelectedFolderPath(null); setSelectedNoteSlug(null); setFolderContent(''); setSelectedNoteName(''); }
+          setExpandedFolderPaths(pruneExpanded);
           await refreshFolders();
         }
 
       } else if (modal.type === 'new-note') {
         if (!modalInput.trim()) return;
         if (isCtx) {
-          const note = await createCtxFolderNote(ctx, modal.folderSlug, modalInput.trim(), memberSlug);
+          const note = await createCtxFolderNote(ctx, modal.folderPath, modalInput.trim(), memberSlug);
           await refreshCtxFolders();
-          setExpandedCtxFolders((p) => new Set([...p, modal.folderSlug]));
-          setCtxFolderSlug(modal.folderSlug);
+          setExpandedCtxFolderPaths((p) => new Set([...p, modal.folderPath]));
+          setCtxFolderPath(modal.folderPath);
           setCtxNoteSlug(note.slug);
           setCtxNoteName(note.name);
+          setNoteEditable(true);
+          setNoteFileName(note.file);
           setContent('');
           setActivePane('ctx-folder');
           setSaveStatus('idle');
         } else {
-          const note = await createFolderNote(modal.folderSlug, modalInput.trim());
+          const note = await createFolderNote(modal.folderPath, modalInput.trim());
           await refreshFolders();
-          setExpandedFolders((p) => new Set([...p, modal.folderSlug]));
-          setSelectedFolderSlug(modal.folderSlug);
+          setExpandedFolderPaths((p) => new Set([...p, modal.folderPath]));
+          setSelectedFolderPath(modal.folderPath);
           setSelectedNoteSlug(note.slug);
           setSelectedNoteName(note.name);
+          setNoteEditable(true);
+          setNoteFileName(note.file);
           setFolderContent('');
           setSaveStatus('idle');
         }
@@ -679,37 +801,37 @@ const Notes: React.FC = () => {
       } else if (modal.type === 'rename-note') {
         if (!modalInput.trim()) return;
         if (isCtx) {
-          await renameCtxFolderNote(ctx, modal.folderSlug, modal.noteSlug, modalInput.trim(), memberSlug);
-          if (ctxFolderSlug === modal.folderSlug && ctxNoteSlug === modal.noteSlug) setCtxNoteName(modalInput.trim());
+          await renameCtxFolderNote(ctx, modal.folderPath, modal.noteSlug, modalInput.trim(), memberSlug);
+          if (ctxFolderPath === modal.folderPath && ctxNoteSlug === modal.noteSlug) setCtxNoteName(modalInput.trim());
           await refreshCtxFolders();
         } else {
-          await renameFolderNote(modal.folderSlug, modal.noteSlug, modalInput.trim());
-          if (selectedFolderSlug === modal.folderSlug && selectedNoteSlug === modal.noteSlug) setSelectedNoteName(modalInput.trim());
+          await renameFolderNote(modal.folderPath, modal.noteSlug, modalInput.trim());
+          if (selectedFolderPath === modal.folderPath && selectedNoteSlug === modal.noteSlug) setSelectedNoteName(modalInput.trim());
           await refreshFolders();
         }
 
       } else if (modal.type === 'delete-note') {
         if (isCtx) {
-          await deleteCtxFolderNote(ctx, modal.folderSlug, modal.noteSlug, memberSlug);
-          if (ctxFolderSlug === modal.folderSlug && ctxNoteSlug === modal.noteSlug) { setCtxFolderSlug(null); setCtxNoteSlug(null); setContent(''); setCtxNoteName(''); setActivePane('date'); }
+          await deleteCtxFolderNote(ctx, modal.folderPath, modal.noteSlug, memberSlug);
+          if (ctxFolderPath === modal.folderPath && ctxNoteSlug === modal.noteSlug) { setCtxFolderPath(null); setCtxNoteSlug(null); setContent(''); setCtxNoteName(''); setActivePane('date'); }
           await refreshCtxFolders();
         } else {
-          await deleteFolderNote(modal.folderSlug, modal.noteSlug);
-          if (selectedFolderSlug === modal.folderSlug && selectedNoteSlug === modal.noteSlug) { setSelectedFolderSlug(null); setSelectedNoteSlug(null); setFolderContent(''); setSelectedNoteName(''); }
+          await deleteFolderNote(modal.folderPath, modal.noteSlug);
+          if (selectedFolderPath === modal.folderPath && selectedNoteSlug === modal.noteSlug) { setSelectedFolderPath(null); setSelectedNoteSlug(null); setFolderContent(''); setSelectedNoteName(''); }
           await refreshFolders();
         }
 
       } else if (modal.type === 'move-note') {
         if (!modalMoveTarget) return;
         if (isCtx) {
-          const result = await moveCtxFolderNote(ctx, modal.folderSlug, modal.noteSlug, modalMoveTarget, memberSlug);
-          if (ctxFolderSlug === modal.folderSlug && ctxNoteSlug === modal.noteSlug) { setCtxFolderSlug(result.targetFolderSlug); setCtxNoteSlug(result.newSlug); }
-          setExpandedCtxFolders((p) => new Set([...p, modalMoveTarget]));
+          const result = await moveCtxFolderNote(ctx, modal.folderPath, modal.noteSlug, modalMoveTarget, memberSlug);
+          if (ctxFolderPath === modal.folderPath && ctxNoteSlug === modal.noteSlug) { setCtxFolderPath(result.targetFolderSlug); setCtxNoteSlug(result.newSlug); }
+          setExpandedCtxFolderPaths((p) => new Set([...p, modalMoveTarget]));
           await refreshCtxFolders();
         } else {
-          const result = await moveFolderNote(modal.folderSlug, modal.noteSlug, modalMoveTarget);
-          if (selectedFolderSlug === modal.folderSlug && selectedNoteSlug === modal.noteSlug) { setSelectedFolderSlug(result.targetFolderSlug); setSelectedNoteSlug(result.newSlug); }
-          setExpandedFolders((p) => new Set([...p, modalMoveTarget]));
+          const result = await moveFolderNote(modal.folderPath, modal.noteSlug, modalMoveTarget);
+          if (selectedFolderPath === modal.folderPath && selectedNoteSlug === modal.noteSlug) { setSelectedFolderPath(result.targetFolderSlug); setSelectedNoteSlug(result.newSlug); }
+          setExpandedFolderPaths((p) => new Set([...p, modalMoveTarget]));
           await refreshFolders();
         }
       }
@@ -734,8 +856,11 @@ const Notes: React.FC = () => {
     : formatDisplayDate(selectedDate);
 
   const hasActiveFolderNote = isFolders
-    ? selectedFolderSlug !== null && selectedNoteSlug !== null
+    ? selectedFolderPath !== null && selectedNoteSlug !== null
     : true;
+
+  // Binary/unknown file types are listed and selectable, but cannot be shown or edited.
+  const isBinaryNote = (isFolders || activePane === 'ctx-folder') && !noteEditable;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -802,15 +927,22 @@ const Notes: React.FC = () => {
               <div className="flex-1 overflow-y-auto p-2">
                 <FolderSidebar
                   folders={folders}
-                  expandedFolders={expandedFolders}
-                  selectedFolderSlug={selectedFolderSlug}
+                  expandedFolderPaths={expandedFolderPaths}
+                  selectedFolderPath={selectedFolderPath}
                   selectedNoteSlug={selectedNoteSlug}
-                  onToggleFolder={(s) => setExpandedFolders((p) => { const n = new Set(p); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+                  refreshingPath={refreshingPath}
+                  onToggleFolder={(s) => setExpandedFolderPaths((p) => { const n = new Set(p); n.has(s) ? n.delete(s) : n.add(s); return n; })}
                   onSelectNote={handleSelectGlobalNote}
+                  onRefreshFolder={handleRefreshFolder}
                   onOpenModal={openModal}
                   scope="global"
                 />
               </div>
+              {refreshMessage && (
+                <div className="px-3 pb-3 text-xs text-gray-500 flex items-center gap-1.5">
+                  <RefreshCw size={11} className="flex-shrink-0" /> {refreshMessage}
+                </div>
+              )}
             </>
           ) : (
             /* ── Daily / Member sidebar ── */
@@ -881,14 +1013,21 @@ const Notes: React.FC = () => {
                         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 py-1">Folders</p>
                         <FolderSidebar
                           folders={ctxFolders}
-                          expandedFolders={expandedCtxFolders}
-                          selectedFolderSlug={ctxFolderSlug}
+                          expandedFolderPaths={expandedCtxFolderPaths}
+                          selectedFolderPath={ctxFolderPath}
                           selectedNoteSlug={ctxNoteSlug}
-                          onToggleFolder={(s) => setExpandedCtxFolders((p) => { const n = new Set(p); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+                          refreshingPath={refreshingPath}
+                          onToggleFolder={(s) => setExpandedCtxFolderPaths((p) => { const n = new Set(p); n.has(s) ? n.delete(s) : n.add(s); return n; })}
                           onSelectNote={handleSelectCtxNote}
+                          onRefreshFolder={handleRefreshFolder}
                           onOpenModal={openModal}
                           scope="ctx"
                         />
+                        {refreshMessage && (
+                          <p className="px-2 pt-1 text-xs text-gray-500 flex items-center gap-1.5">
+                            <RefreshCw size={11} className="flex-shrink-0" /> {refreshMessage}
+                          </p>
+                        )}
                         <div className="border-t border-gray-100 mt-2 mb-2" />
                       </div>
                     )}
@@ -960,7 +1099,7 @@ const Notes: React.FC = () => {
                   {activePane === 'ctx-folder' && (
                     <p className="text-xs text-indigo-600 font-medium mt-0.5">
                       {noteContext === 'member' && selectedMember ? `${selectedMember.name} · ` : ''}
-                      {ctxFolders.find((f) => f.slug === ctxFolderSlug)?.name ?? ''}
+                      {findFolder(ctxFolders, ctxFolderPath)?.name ?? ''}
                     </p>
                   )}
                   {!isFolders && activePane === 'date' && !noteExists && !loading && content === '' && (
@@ -1060,6 +1199,12 @@ const Notes: React.FC = () => {
               {/* Editor / Preview */}
               {loading ? (
                 <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading…</div>
+              ) : isBinaryNote ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-2 text-gray-400 text-sm">
+                  <FileLock2 size={32} className="opacity-30" />
+                  <p>Preview not available for this file type</p>
+                  <code className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">{noteFileName}</code>
+                </div>
               ) : (
                 <div className="flex-1 flex min-h-0">
                   {(mode === 'edit' || mode === 'split') && (
@@ -1154,9 +1299,13 @@ const Notes: React.FC = () => {
               <p className="text-sm text-gray-600 mb-3">Move <strong>{modal.noteName}</strong> to:</p>
               <select value={modalMoveTarget} onChange={(e) => setModalMoveTarget(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                {(modal.scope === 'global' ? folders : ctxFolders)
-                  .filter((f) => f.slug !== modal.folderSlug)
-                  .map((f) => <option key={f.slug} value={f.slug}>{f.name}</option>)}
+                {flattenFolders(modal.scope === 'global' ? folders : ctxFolders)
+                  .filter(({ folder }) => folder.path !== modal.folderPath)
+                  .map(({ folder, depth }) => (
+                    <option key={folder.path} value={folder.path}>
+                      {`${'\u00a0\u00a0'.repeat(depth)}${depth ? '↳ ' : ''}${folder.name}`}
+                    </option>
+                  ))}
               </select>
             </SimpleModal>
           )}

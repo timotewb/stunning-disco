@@ -23,6 +23,7 @@ import type {
   Folder,
   FolderNote,
   FolderNoteContent,
+  FolderRefreshResult,
   NotesScanResult,
   ScannerConfig,
 } from '../types';
@@ -234,6 +235,8 @@ export const renameFolder = (folderSlug: string, name: string) =>
   api.patch<{ slug: string; name: string }>(`/notes/folders/${folderSlug}`, { name }).then((r) => r.data);
 export const deleteFolder = (folderSlug: string) =>
   api.delete(`/notes/folders/${folderSlug}`);
+export const refreshFolder = (folderSlug: string) =>
+  api.post<FolderRefreshResult>(`/notes/folders/${folderSlug}/refresh`).then((r) => r.data);
 export const createFolderNote = (folderSlug: string, name: string) =>
   api.post<FolderNoteContent>(`/notes/folders/${folderSlug}/notes`, { name }).then((r) => r.data);
 export const getFolderNote = (folderSlug: string, noteSlug: string) =>
@@ -262,6 +265,8 @@ export const renameCtxFolder = (ctx: 'daily' | 'member', folderSlug: string, nam
   api.patch<{ slug: string; name: string }>(`${ctxBase(ctx, memberSlug)}/${folderSlug}`, { name }).then((r) => r.data);
 export const deleteCtxFolder = (ctx: 'daily' | 'member', folderSlug: string, memberSlug?: string) =>
   api.delete(`${ctxBase(ctx, memberSlug)}/${folderSlug}`);
+export const refreshCtxFolder = (ctx: 'daily' | 'member', folderSlug: string, memberSlug?: string) =>
+  api.post<FolderRefreshResult>(`${ctxBase(ctx, memberSlug)}/${folderSlug}/refresh`).then((r) => r.data);
 export const createCtxFolderNote = (ctx: 'daily' | 'member', folderSlug: string, name: string, memberSlug?: string) =>
   api.post<FolderNoteContent>(`${ctxBase(ctx, memberSlug)}/${folderSlug}/notes`, { name }).then((r) => r.data);
 export const getCtxFolderNote = (ctx: 'daily' | 'member', folderSlug: string, noteSlug: string, memberSlug?: string) =>
