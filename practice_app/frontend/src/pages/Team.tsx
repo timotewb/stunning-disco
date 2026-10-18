@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Plus, Pencil, Trash2, X, Check, AlertTriangle, UserX, UserCheck } from 'lucide-react';
-import type { TeamMember, SeniorityConfig, Contact } from '../types';
+import type { TeamMember, SeniorityConfig, Contact, CapacityChange } from '../types';
 import {
   getTeam, createMember, updateMember, deleteMember, getSeniorityConfigs,
   getContacts, createContact, updateContact, deleteContact,
+  getCapacityChanges, createCapacityChange, deleteCapacityChange,
 } from '../api/client';
 
 const PRESET_BADGE_COLORS: Record<string, string> = {
@@ -20,7 +21,18 @@ const PRESET_BADGE_COLORS: Record<string, string> = {
   gray:   'bg-gray-100 text-gray-600',
 };
 
-const emptyForm = { name: '', role: '', seniority: '', tags: [] as string[], notes: '', isLeaving: false, hasLeft: false };
+const emptyForm = {
+  name: '',
+  role: '',
+  seniority: '',
+  tags: [] as string[],
+  notes: '',
+  isLeaving: false,
+  hasLeft: false,
+  baselineFte: 1,
+  startDate: '',
+  endDate: '',
+};
 
 const Team: React.FC = () => {
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -42,6 +54,54 @@ const Team: React.FC = () => {
   const [newContact, setNewContact] = useState({ name: '', role: '', team: '', email: '' });
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [deleteConfirmContact, setDeleteConfirmContact] = useState<string | null>(null);
+
+  // Capacity changes for the member currently open in the modal
+  const [changes, setChanges] = useState<CapacityChange[]>([]);
+  const [changeForm, setChangeForm] = useState({
+    effectiveFrom: '',
+    effectiveTo: '',
+    fte: 0.5,
+    reason: '',
+  });
+  const [changeError, setChangeError] = useState('');
+
+  const loadChanges = async (memberId: string) => {
+    try {
+      setChanges(await getCapacityChanges(memberId));
+    } catch {
+      setChanges([]);
+    }
+    setChangeForm({ effectiveFrom: '', effectiveTo: '', fte: 0.5, reason: '' });
+    setChangeError('');
+  };
+
+  const handleAddChange = async () => {
+    if (!editingId || !changeForm.effectiveFrom || !changeForm.reason.trim()) return;
+    try {
+      await createCapacityChange({
+        teamMemberId: editingId,
+        effectiveFrom: changeForm.effectiveFrom,
+        effectiveTo: changeForm.effectiveTo || null,
+        fte: changeForm.fte,
+        reason: changeForm.reason.trim(),
+      });
+      setChangeError('');
+      loadChanges(editingId);
+    } catch (e) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setChangeError(msg || 'Failed to add capacity change.');
+    }
+  };
+
+  const handleDeleteChange = async (id: string) => {
+    if (!editingId) return;
+    try {
+      await deleteCapacityChange(id);
+      loadChanges(editingId);
+    } catch {
+      setChangeError('Failed to remove capacity change.');
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -111,24 +171,43 @@ const Team: React.FC = () => {
     setTagInput('');
     setRoleSuggestions([]);
     setEditingId(null);
+    setChanges([]);
     setShowModal(true);
   };
 
   const openEdit = (m: TeamMember) => {
-    setForm({ name: m.name, role: m.role, seniority: m.seniority, tags: [...m.tags], notes: m.notes, isLeaving: m.isLeaving, hasLeft: m.hasLeft });
+    setForm({
+      name: m.name,
+      role: m.role,
+      seniority: m.seniority,
+      tags: [...m.tags],
+      notes: m.notes,
+      isLeaving: m.isLeaving,
+      hasLeft: m.hasLeft,
+      baselineFte: m.baselineFte ?? 1,
+      startDate: m.startDate ? m.startDate.slice(0, 10) : '',
+      endDate: m.endDate ? m.endDate.slice(0, 10) : '',
+    });
     setTagInput('');
     setRoleSuggestions([]);
     setEditingId(m.id);
+    loadChanges(m.id);
     setShowModal(true);
   };
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.role.trim()) return;
+    // Empty date strings must become null, not '', or the API rejects them.
+    const payload = {
+      ...form,
+      startDate: form.startDate || null,
+      endDate: form.endDate || null,
+    };
     try {
       if (editingId) {
-        await updateMember(editingId, form);
+        await updateMember(editingId, payload);
       } else {
-        await createMember(form);
+        await createMember(payload);
       }
       setShowModal(false);
       load();
@@ -516,6 +595,161 @@ const Team: React.FC = () => {
                     className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${form.hasLeft ? 'translate-x-5' : 'translate-x-0'}`}
                   />
                 </button>
+              </div>
+
+              {/* ── Capacity ──────────────────────────────────────────────── */}
+              <div className="pt-2 border-t border-gray-200">
+                <p className="text-sm font-semibold text-gray-800 mb-1">Capacity</p>
+                <p className="text-xs text-gray-500 mb-3">
+                  1.0 FTE is full time. Start and end dates bound when this person counts
+                  toward team capacity.
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  <Field label="Baseline FTE">
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={form.baselineFte}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, baselineFte: Number(e.target.value) }))
+                      }
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                  </Field>
+                  <Field label="Start date">
+                    <input
+                      type="date"
+                      value={form.startDate}
+                      onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                  </Field>
+                  <Field label="End date">
+                    <input
+                      type="date"
+                      value={form.endDate}
+                      min={form.startDate || undefined}
+                      onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                  </Field>
+                </div>
+
+                {editingId ? (
+                  <div className="mt-4">
+                    <p className="text-xs font-medium text-gray-700 mb-2">
+                      Capacity changes
+                    </p>
+                    {changes.length > 0 && (
+                      <div className="space-y-1.5 mb-3">
+                        {changes.map((c) => (
+                          <div
+                            key={c.id}
+                            className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2"
+                          >
+                            <div className="text-xs text-gray-700">
+                              <span className="font-medium">{c.fte} FTE</span>{' '}
+                              <span className="text-gray-500">
+                                from {c.effectiveFrom.slice(0, 10)}
+                                {c.effectiveTo
+                                  ? ` to ${c.effectiveTo.slice(0, 10)}`
+                                  : ' onwards'}
+                              </span>
+                              {c.reason && (
+                                <span className="text-gray-400"> — {c.reason}</span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteChange(c.id)}
+                              className="text-gray-400 hover:text-red-600"
+                              aria-label="Remove capacity change"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-3">
+                        <label className="block text-[11px] text-gray-500 mb-1">From</label>
+                        <input
+                          type="date"
+                          value={changeForm.effectiveFrom}
+                          onChange={(e) =>
+                            setChangeForm((c) => ({ ...c, effectiveFrom: e.target.value }))
+                          }
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                        />
+                      </div>
+                      <div className="col-span-3">
+                        <label className="block text-[11px] text-gray-500 mb-1">
+                          To <span className="text-gray-400">(optional)</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={changeForm.effectiveTo}
+                          min={changeForm.effectiveFrom || undefined}
+                          onChange={(e) =>
+                            setChangeForm((c) => ({ ...c, effectiveTo: e.target.value }))
+                          }
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-[11px] text-gray-500 mb-1">FTE</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.1}
+                          value={changeForm.fte}
+                          onChange={(e) =>
+                            setChangeForm((c) => ({ ...c, fte: Number(e.target.value) }))
+                          }
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                        />
+                      </div>
+                      <div className="col-span-3">
+                        <label className="block text-[11px] text-gray-500 mb-1">Reason</label>
+                        <input
+                          type="text"
+                          value={changeForm.reason}
+                          placeholder="Parental leave"
+                          onChange={(e) =>
+                            setChangeForm((c) => ({ ...c, reason: e.target.value }))
+                          }
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <button
+                          type="button"
+                          onClick={handleAddChange}
+                          disabled={!changeForm.effectiveFrom || !changeForm.reason.trim()}
+                          className="w-full flex items-center justify-center px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-40"
+                          aria-label="Add capacity change"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1.5">
+                      Leave "To" blank for a permanent change. Set it for a temporary one —
+                      capacity reverts automatically afterwards.
+                    </p>
+                    {changeError && (
+                      <p className="text-xs text-red-600 mt-1.5">{changeError}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-3">
+                    Save this member to add capacity changes.
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">

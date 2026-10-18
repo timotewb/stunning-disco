@@ -1,0 +1,3 @@
+# Local development database — never commit; may contain real team data
+*.db
+*.db-journal

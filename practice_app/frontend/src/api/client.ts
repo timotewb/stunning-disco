@@ -26,6 +26,9 @@ import type {
   FolderRefreshResult,
   NotesScanResult,
   ScannerConfig,
+  CapacityChange,
+  CapacityResponse,
+  Holiday,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -182,8 +185,12 @@ export const deleteRequestEffortConfig = (id: string) => api.delete(`/request-ef
 // Allocation Types
 export const getAllocationTypes = () =>
   api.get<AllocationTypeConfig[]>('/allocation-types').then((r) => r.data);
-export const createAllocationType = (data: { name: string; color: string }) =>
+export const createAllocationType = (data: { name: string; color: string; reducesCapacity?: boolean }) =>
   api.post<AllocationTypeConfig>('/allocation-types', data).then((r) => r.data);
+export const updateAllocationType = (
+  id: string,
+  data: Partial<Pick<AllocationTypeConfig, 'name' | 'color' | 'reducesCapacity'>>
+) => api.put<AllocationTypeConfig>(`/allocation-types/${id}`, data).then((r) => r.data);
 export const deleteAllocationType = (id: string) => api.delete(`/allocation-types/${id}`);
 
 // Seniority Config
@@ -354,3 +361,45 @@ export const uploadNoteImage = (base64: string, mimeType: string) =>
 
 export const cleanupOrphanImages = () =>
   api.post<{ deleted: number }>('/notes/images/cleanup').then((r) => r.data);
+
+// ── Capacity ──────────────────────────────────────────────────────────────────
+export const getCapacity = (params: {
+  from: string;
+  to: string;
+  bucket?: 'week' | 'month';
+  groupBy?: 'none' | 'role' | 'seniority' | 'tag';
+}) => api.get<CapacityResponse>('/capacity', { params }).then((r) => r.data);
+
+export const getCapacityConfig = () =>
+  api.get<{ hoursPerFte: number }>('/capacity/config').then((r) => r.data);
+
+export const saveCapacityConfig = (cfg: { hoursPerFte: number }) =>
+  api.put<{ hoursPerFte: number }>('/capacity/config', cfg).then((r) => r.data);
+
+export const getUndatedLeavers = () =>
+  api.get<TeamMember[]>('/capacity/undated-leavers').then((r) => r.data);
+
+export const getCapacityChanges = (teamMemberId: string) =>
+  api.get<CapacityChange[]>(`/capacity/changes/${teamMemberId}`).then((r) => r.data);
+
+export const createCapacityChange = (
+  data: Omit<CapacityChange, 'id' | 'createdAt'>
+) => api.post<CapacityChange>('/capacity/changes', data).then((r) => r.data);
+
+export const updateCapacityChange = (id: string, data: Partial<CapacityChange>) =>
+  api.put<CapacityChange>(`/capacity/changes/${id}`, data).then((r) => r.data);
+
+export const deleteCapacityChange = (id: string) =>
+  api.delete(`/capacity/changes/${id}`);
+
+// ── Holidays ──────────────────────────────────────────────────────────────────
+export const getHolidays = (params?: { from?: string; to?: string }) =>
+  api.get<Holiday[]>('/holidays', { params }).then((r) => r.data);
+
+export const createHoliday = (data: { name: string; date: string }) =>
+  api.post<Holiday>('/holidays', data).then((r) => r.data);
+
+export const updateHoliday = (id: string, data: { name?: string; date?: string }) =>
+  api.put<Holiday>(`/holidays/${id}`, data).then((r) => r.data);
+
+export const deleteHoliday = (id: string) => api.delete(`/holidays/${id}`);

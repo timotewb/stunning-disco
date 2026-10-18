@@ -7,7 +7,71 @@ export interface TeamMember {
   notes: string;
   isLeaving: boolean;
   hasLeft: boolean;
+  baselineFte: number;
+  startDate?: string | null;
+  endDate?: string | null;
+  capacityChanges?: CapacityChange[];
   createdAt: string;
+}
+
+/**
+ * A deviation from a member's baseline FTE. `effectiveTo: null` is an
+ * open-ended step change; a set `effectiveTo` is a bounded period that
+ * automatically reverts to whatever applied before it.
+ */
+export interface CapacityChange {
+  id: string;
+  teamMemberId: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  fte: number;
+  reason: string;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface Holiday {
+  id: string;
+  name: string;
+  date: string;
+  createdAt: string;
+}
+
+export interface CapacityBucket {
+  start: string;
+  end: string;
+  label: string;
+}
+
+export interface CapacitySeries {
+  key: string;
+  capacity: number[];
+  leave: number[];
+  available: number[];
+  demand: number[];
+  overcommitted: boolean[];
+}
+
+export interface CapacityReduction {
+  bucketIndex: number;
+  memberName: string;
+  from: number;
+  to: number;
+  reason: string;
+}
+
+export interface CapacityResponse {
+  buckets: CapacityBucket[];
+  series: CapacitySeries[];
+  reductions: CapacityReduction[];
+  totals: {
+    capacityFteNow: number;
+    availableFteNow: number;
+    demandFteNow: number;
+    headroomFteNow: number;
+    overcommittedBuckets: number;
+  };
+  hoursPerFte: number;
 }
 
 export interface Dimension {
@@ -75,6 +139,8 @@ export interface WorkRequest {
   allocationType?: string;
   allocationStartDate?: string;
   allocationEndDate?: string;
+  /** Fraction (0–1) of the assignee's capacity this allocation consumes. */
+  allocationFte?: number;
   allocationNotes?: string;
   noteRef?: string;
   tags: string[];
@@ -170,6 +236,8 @@ export interface AllocationTypeConfig {
   id: string;
   name: string;
   color: string;
+  /** Whether work of this type subtracts from available capacity (e.g. leave). */
+  reducesCapacity: boolean;
   createdAt: string;
 }
 

@@ -8,6 +8,18 @@ import { getConfigPath, resolveOllamaUrl, readConfig, ollamaPost, readPrompts, r
 const router = Router();
 const prisma = new PrismaClient();
 
+/**
+ * Validates `allocationFte` — the fraction of the assignee's capacity an
+ * allocation consumes. Returns undefined for absent or invalid input so callers
+ * leave the stored value (or the 1.0 default) untouched rather than zeroing it.
+ */
+function parseAllocationFte(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 1) return undefined;
+  return n;
+}
+
 // ── Scanner config ────────────────────────────────────────────────────────────
 
 interface ScannerConfig {
@@ -484,6 +496,7 @@ router.post('/', async (req: Request, res: Response) => {
       allocationType,
       allocationStartDate,
       allocationEndDate,
+      allocationFte,
       allocationNotes,
       noteRef,
       tags = '[]',
@@ -518,6 +531,9 @@ router.post('/', async (req: Request, res: Response) => {
         allocationType,
         allocationStartDate: allocationStartDate ? new Date(allocationStartDate) : undefined,
         allocationEndDate: allocationEndDate ? new Date(allocationEndDate) : undefined,
+        ...(parseAllocationFte(allocationFte) !== undefined && {
+          allocationFte: parseAllocationFte(allocationFte),
+        }),
         allocationNotes,
         noteRef,
         tags: Array.isArray(tags) ? JSON.stringify(tags) : tags,
@@ -561,6 +577,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       allocationType,
       allocationStartDate,
       allocationEndDate,
+      allocationFte,
       allocationNotes,
       noteRef,
       tags,
@@ -606,6 +623,9 @@ router.put('/:id', async (req: Request, res: Response) => {
         }),
         ...(allocationEndDate !== undefined && {
           allocationEndDate: allocationEndDate ? new Date(allocationEndDate) : null,
+        }),
+        ...(parseAllocationFte(allocationFte) !== undefined && {
+          allocationFte: parseAllocationFte(allocationFte),
         }),
         ...(allocationNotes !== undefined && { allocationNotes }),
         ...(noteRef !== undefined && { noteRef }),

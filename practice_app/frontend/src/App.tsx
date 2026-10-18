@@ -7,6 +7,7 @@ import Matrices from './pages/Matrices';
 import Timeline from './pages/Timeline';
 import Requests from './pages/Requests';
 import Capabilities from './pages/Capabilities';
+import Capacity from './pages/Capacity';
 import Settings from './pages/Settings';
 import Notes from './pages/Notes';
 import { SnapshotProvider } from './context/SnapshotContext';
@@ -26,6 +27,7 @@ const App: React.FC = () => {
               <Route path="timeline" element={<Timeline />} />
               <Route path="requests" element={<Requests />} />
               <Route path="capabilities" element={<Capabilities />} />
+              <Route path="capacity" element={<Capacity />} />
               <Route path="notes" element={<Notes />} />
               <Route path="settings" element={<Settings />} />
             </Route>

@@ -181,7 +181,7 @@ const Requests: React.FC = () => {
     if (filterDraftsOnly) list = list.filter((r) => r.isDraft);
     if (filterHideLeave) {
       const leaveTypeNames = new Set(
-        allocationTypes.filter((t) => t.name.toLowerCase().includes('leave')).map((t) => t.name)
+        allocationTypes.filter((t) => t.reducesCapacity).map((t) => t.name)
       );
       list = list.filter((r) => !r.allocationType || !leaveTypeNames.has(r.allocationType));
     }

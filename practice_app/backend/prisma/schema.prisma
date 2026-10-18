@@ -12,19 +12,51 @@ datasource db {
 }
 
 model TeamMember {
-  id            String          @id @default(uuid())
-  name          String
-  role          String
-  seniority     String
-  tags          String          @default("[]")
-  notes         String          @default("")
-  isLeaving     Boolean         @default(false)
-  hasLeft       Boolean         @default(false)
-  createdAt     DateTime        @default(now())
-  matrixEntries MatrixEntry[]
-  workRequests  WorkRequest[]   @relation("RequestAssignee")
-  primarySME    SMEAssignment[] @relation("PrimarySME")
-  backupSME     SMEAssignment[] @relation("BackupSME")
+  id              String           @id @default(uuid())
+  name            String
+  role            String
+  seniority       String
+  tags            String           @default("[]")
+  notes           String           @default("")
+  isLeaving       Boolean          @default(false)
+  hasLeft         Boolean          @default(false)
+  baselineFte     Float            @default(1.0)
+  startDate       DateTime?
+  endDate         DateTime?
+  createdAt       DateTime         @default(now())
+  matrixEntries   MatrixEntry[]
+  workRequests    WorkRequest[]    @relation("RequestAssignee")
+  primarySME      SMEAssignment[]  @relation("PrimarySME")
+  backupSME       SMEAssignment[]  @relation("BackupSME")
+  capacityChanges CapacityChange[]
+}
+
+/// An effective-dated change to a member's FTE.
+/// `effectiveTo` null means an open-ended step change; when set, the change is a
+/// bounded period that auto-reverts (e.g. reduced hours for three weeks).
+/// Resolution: of all rows covering a date, the greatest `effectiveFrom` wins.
+model CapacityChange {
+  id            String     @id @default(uuid())
+  teamMemberId  String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  fte           Float
+  reason        String?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  teamMember    TeamMember @relation(fields: [teamMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([teamMemberId, effectiveFrom])
+  @@index([teamMemberId, effectiveFrom])
+}
+
+/// Public holidays. Treated as working days with zero capacity (not excluded
+/// days) so the capacity dip stays visible in weekly figures.
+model Holiday {
+  id        String   @id @default(uuid())
+  name      String
+  date      DateTime @unique
+  createdAt DateTime @default(now())
 }
 
 model Dimension {
@@ -69,10 +101,13 @@ model MatrixEntry {
 }
 
 model AllocationTypeConfig {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  color     String   @default("gray")
-  createdAt DateTime @default(now())
+  id              String   @id @default(uuid())
+  name            String   @unique
+  color           String   @default("gray")
+  /// When true, allocations of this type subtract from available capacity
+  /// (leave, secondment) rather than counting as demand on the team.
+  reducesCapacity Boolean  @default(false)
+  createdAt       DateTime @default(now())
 }
 
 model WorkRequest {
@@ -97,6 +132,9 @@ model WorkRequest {
   allocationType      String?
   allocationStartDate DateTime?
   allocationEndDate   DateTime?
+  /// Fraction of the assignee's capacity this allocation consumes (1.0 = all of it).
+  /// Relative to the person, so a 0.6 FTE member at 1.0 contributes 0.6 FTE.
+  allocationFte       Float       @default(1.0)
   allocationNotes     String?
   // Metadata
   noteRef             String?

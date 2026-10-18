@@ -3,7 +3,7 @@ import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown, Loader2, Tog
 import type {
   Dimension, DimensionNode, Snapshot, AllocationTypeConfig, SeniorityConfig, AiStatus, OllamaModel, AiPrompts,
   RequestSourceConfig, RequestTypeConfig, RequestPriorityConfig, RequestStatusConfig, RequestEffortConfig,
-  ScannerConfig,
+  ScannerConfig, Holiday,
 } from '../types';
 import {
   getDimensions,
@@ -18,7 +18,13 @@ import {
   deleteSnapshots,
   getAllocationTypes,
   createAllocationType,
+  updateAllocationType,
   deleteAllocationType,
+  getCapacityConfig,
+  saveCapacityConfig,
+  getHolidays,
+  createHoliday,
+  deleteHoliday,
   getSeniorityConfigs,
   createSeniorityConfig,
   deleteSeniorityConfig,
@@ -114,6 +120,15 @@ const Settings: React.FC = () => {
 
   // Active settings section
   const [activeSection, setActiveSection] = useState('dimensions');
+
+  // Capacity settings
+  const [hoursPerFte, setHoursPerFte] = useState('37.5');
+  const [hoursSaving, setHoursSaving] = useState(false);
+  const [hoursSaved, setHoursSaved] = useState(false);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [holidaysLoading, setHolidaysLoading] = useState(true);
+  const [newHoliday, setNewHoliday] = useState({ name: '', date: '' });
+  const [holidayYear, setHolidayYear] = useState(String(new Date().getFullYear()));
 
   // Data migration state
   const [exportBusy, setExportBusy] = useState(false);
@@ -290,7 +305,7 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     load(); loadSnapshots(); loadAllocTypes(); loadSeniorityConfigs(); loadAiStatus(); loadAiPrompts();
-    loadReqConfigs();
+    loadReqConfigs(); loadCapacitySettings();
   }, []);
 
   useEffect(() => {
@@ -407,6 +422,67 @@ const Settings: React.FC = () => {
       loadAllocTypes();
     } catch {
       setError('Failed to delete allocation type.');
+    }
+  };
+
+  const handleToggleReducesCapacity = async (t: AllocationTypeConfig) => {
+    try {
+      await updateAllocationType(t.id, { reducesCapacity: !t.reducesCapacity });
+      loadAllocTypes();
+    } catch {
+      setError('Failed to update allocation type.');
+    }
+  };
+
+  // ── Capacity settings ───────────────────────────────────────────────────────
+  const loadCapacitySettings = async () => {
+    setHolidaysLoading(true);
+    try {
+      const [cfg, hols] = await Promise.all([getCapacityConfig(), getHolidays()]);
+      setHoursPerFte(String(cfg.hoursPerFte));
+      setHolidays(hols);
+    } catch {
+      setError('Failed to load capacity settings.');
+    } finally {
+      setHolidaysLoading(false);
+    }
+  };
+
+  const handleSaveHours = async () => {
+    const n = Number(hoursPerFte);
+    if (!Number.isFinite(n) || n <= 0 || n > 168) {
+      setError('Hours per FTE must be between 0 and 168.');
+      return;
+    }
+    setHoursSaving(true);
+    try {
+      await saveCapacityConfig({ hoursPerFte: n });
+      setHoursSaved(true);
+      setTimeout(() => setHoursSaved(false), 2000);
+    } catch {
+      setError('Failed to save hours per FTE.');
+    } finally {
+      setHoursSaving(false);
+    }
+  };
+
+  const handleAddHoliday = async () => {
+    if (!newHoliday.name.trim() || !newHoliday.date) return;
+    try {
+      await createHoliday({ name: newHoliday.name.trim(), date: newHoliday.date });
+      setNewHoliday({ name: '', date: '' });
+      loadCapacitySettings();
+    } catch (e: any) {
+      setError(e?.response?.data?.error ?? 'Failed to add holiday.');
+    }
+  };
+
+  const handleDeleteHoliday = async (id: string) => {
+    try {
+      await deleteHoliday(id);
+      loadCapacitySettings();
+    } catch {
+      setError('Failed to delete holiday.');
     }
   };
 
@@ -530,7 +606,8 @@ const Settings: React.FC = () => {
   const NAV_GROUPS = [
     { group: 'Capabilities', icon: Layers,       items: [{ id: 'dimensions',          label: 'Dimensions'          }] },
     { group: 'Timeline',     icon: CalendarDays,  items: [{ id: 'allocation-types',    label: 'Allocation Types'    },
-                                                           { id: 'seniority',           label: 'Seniority Levels'    }] },
+                                                           { id: 'seniority',           label: 'Seniority Levels'    },
+                                                           { id: 'capacity',            label: 'Capacity'            }] },
     { group: 'Work Requests',icon: Inbox,         items: [{ id: 'request-taxonomies',  label: 'Request Taxonomies'  },
                                                            { id: 'scanner',             label: 'Notes Scanner'       }] },
     { group: 'AI',           icon: Sparkles,      items: [{ id: 'ai-config',           label: 'AI / Ollama'         },
@@ -824,11 +901,135 @@ const Settings: React.FC = () => {
       </section>
       )}
 
+      {activeSection === 'capacity' && (
+      <section>
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">Capacity</h3>
+        <p className="text-sm text-gray-500 mb-5">
+          Capacity is measured in FTE, where 1.0 is full time. These settings control how
+          FTE is displayed as hours and which days count as non-working.
+        </p>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Hours per FTE, per week
+          </label>
+          <p className="text-xs text-gray-500 mb-3">
+            Used only for display. Changing it does not alter any stored capacity.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              max={168}
+              step={0.5}
+              value={hoursPerFte}
+              onChange={(e) => setHoursPerFte(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-28 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+            <button
+              onClick={handleSaveHours}
+              disabled={hoursSaving}
+              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-lg disabled:opacity-50"
+            >
+              {hoursSaving ? 'Saving…' : 'Save'}
+            </button>
+            {hoursSaved && (
+              <span className="text-xs text-green-600 flex items-center gap-1">
+                <Check size={13} /> Saved
+              </span>
+            )}
+          </div>
+        </div>
+
+        <h4 className="text-sm font-semibold text-gray-800 mb-1">Public holidays</h4>
+        <p className="text-xs text-gray-500 mb-4">
+          Holidays are working days with zero capacity, so they show as a visible dip rather
+          than disappearing. Committed work is excluded on these days too. Seeded with New
+          Zealand national holidays — add regional anniversary days or company closedowns as
+          needed.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <input
+            type="text"
+            placeholder="Holiday name…"
+            value={newHoliday.name}
+            onChange={(e) => setNewHoliday((h) => ({ ...h, name: e.target.value }))}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 w-56"
+          />
+          <input
+            type="date"
+            value={newHoliday.date}
+            onChange={(e) => setNewHoliday((h) => ({ ...h, date: e.target.value }))}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <button
+            onClick={handleAddHoliday}
+            disabled={!newHoliday.name.trim() || !newHoliday.date}
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-lg disabled:opacity-50"
+          >
+            <Plus size={14} /> Add
+          </button>
+          <select
+            value={holidayYear}
+            onChange={(e) => setHolidayYear(e.target.value)}
+            className="ml-auto border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          >
+            {Array.from(new Set(holidays.map((h) => h.date.slice(0, 4))))
+              .sort()
+              .map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+          </select>
+        </div>
+
+        {holidaysLoading ? (
+          <div className="text-sm text-gray-400">Loading…</div>
+        ) : (
+          <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+            {holidays.filter((h) => h.date.startsWith(holidayYear)).length === 0 ? (
+              <div className="px-4 py-3 text-sm text-gray-400">
+                No holidays recorded for {holidayYear}.
+              </div>
+            ) : (
+              holidays
+                .filter((h) => h.date.startsWith(holidayYear))
+                .map((h) => (
+                  <div key={h.id} className="flex items-center justify-between px-4 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-gray-800">{h.name}</span>
+                      <span className="text-xs text-gray-400">
+                        {new Date(h.date).toLocaleDateString('en-NZ', {
+                          weekday: 'short',
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          timeZone: 'UTC',
+                        })}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteHoliday(h.id)}
+                      className="p-1.5 text-gray-400 hover:text-red-500 rounded"
+                      title="Delete holiday"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))
+            )}
+          </div>
+        )}
+      </section>
+      )}
+
       {activeSection === 'allocation-types' && (
       <section>
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Allocation Types</h3>
         <p className="text-sm text-gray-500 mb-4">
-          Define the types available when creating allocations on the Timeline. Removing a type that is already in use will display those allocations as <span className="font-medium text-gray-700">uncategorised</span>.
+          Define the types available when creating allocations on the Timeline. Removing a type that is already in use will display those allocations as <span className="font-medium text-gray-700">uncategorised</span>. Types marked <span className="font-medium text-gray-700">reduces capacity</span> are treated as leave and subtract from the team's available capacity.
         </p>
 
         {/* Add new type */}
@@ -872,6 +1073,16 @@ const Settings: React.FC = () => {
                   <span className={`w-3 h-3 rounded-full flex-shrink-0 ${COLOR_SWATCHES[t.color] ?? 'bg-gray-400'}`} />
                   <span className="text-sm text-gray-800">{t.name}</span>
                 </div>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={t.reducesCapacity}
+                      onChange={() => handleToggleReducesCapacity(t)}
+                      className="accent-amber-500"
+                    />
+                    Reduces capacity
+                  </label>
                 {deleteConfirmType === t.id ? (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-500">Delete?</span>
@@ -887,6 +1098,7 @@ const Settings: React.FC = () => {
                     <Trash2 size={14} />
                   </button>
                 )}
+                </div>
               </div>
             ))}
           </div>
