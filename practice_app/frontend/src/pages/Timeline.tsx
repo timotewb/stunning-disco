@@ -72,6 +72,7 @@ const emptyForm = {
   allocationType: 'project',
   allocationStartDate: '',
   allocationEndDate: '',
+  allocationFte: 1,
   allocationNotes: '',
 };
 
@@ -158,6 +159,7 @@ const Timeline: React.FC = () => {
       allocationType: r.allocationType ?? allocationTypes[0]?.name ?? 'project',
       allocationStartDate: r.allocationStartDate ? toDateInput(new Date(r.allocationStartDate)) : '',
       allocationEndDate: r.allocationEndDate ? toDateInput(new Date(r.allocationEndDate)) : '',
+      allocationFte: r.allocationFte ?? 1,
       allocationNotes: r.allocationNotes ?? '',
     });
     setEditingId(r.id);
@@ -404,6 +406,26 @@ const Timeline: React.FC = () => {
                   />
                 </Field>
               </div>
+              <Field label="Share of capacity">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={form.allocationFte}
+                    onChange={(e) => setForm((f) => ({ ...f, allocationFte: Number(e.target.value) }))}
+                    className="flex-1 accent-indigo-600"
+                  />
+                  <span className="text-sm font-medium text-gray-700 w-12 text-right tabular-nums">
+                    {Math.round(form.allocationFte * 100)}%
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  How much of this person's capacity this takes. 100% means full time on
+                  this while it runs.
+                </p>
+              </Field>
               <Field label="Notes">
                 <textarea
                   value={form.allocationNotes}

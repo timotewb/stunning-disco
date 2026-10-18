@@ -81,6 +81,8 @@ router.get('/export', async (_req, res) => {
       requestPriorityConfigs,
       requestStatusConfigs,
       requestEffortConfigs,
+      capacityChanges,
+      holidays,
     ] = await Promise.all([
       prisma.teamMember.findMany({ orderBy: { createdAt: 'asc' } }),
       prisma.dimension.findMany({
@@ -99,6 +101,8 @@ router.get('/export', async (_req, res) => {
       prisma.requestPriorityConfig.findMany(),
       prisma.requestStatusConfig.findMany(),
       prisma.requestEffortConfig.findMany(),
+      prisma.capacityChange.findMany({ orderBy: { effectiveFrom: 'asc' } }),
+      prisma.holiday.findMany({ orderBy: { date: 'asc' } }),
     ]);
 
     // Flatten dimension nodes (exported separately to simplify import ordering)
@@ -142,6 +146,8 @@ router.get('/export', async (_req, res) => {
         requestPriorityConfigs: requestPriorityConfigs.length,
         requestStatusConfigs: requestStatusConfigs.length,
         requestEffortConfigs: requestEffortConfigs.length,
+        capacityChanges: capacityChanges.length,
+        holidays: holidays.length,
       },
       data: {
         teamMembers,
@@ -159,6 +165,8 @@ router.get('/export', async (_req, res) => {
         requestPriorityConfigs,
         requestStatusConfigs,
         requestEffortConfigs,
+        capacityChanges,
+        holidays,
         notes,
         images,
       },
@@ -193,11 +201,13 @@ router.post('/import', async (req, res) => {
         await tx.matrixEntry.deleteMany();
         await tx.sMEAssignment.deleteMany();
         await tx.workRequest.deleteMany();
+        await tx.capacityChange.deleteMany();
         await tx.dimensionNode.deleteMany();
         await tx.dimension.deleteMany();
         await tx.teamMember.deleteMany();
         await tx.snapshot.deleteMany();
         await tx.contact.deleteMany();
+        await tx.holiday.deleteMany();
         await tx.allocationTypeConfig.deleteMany();
         await tx.seniorityConfig.deleteMany();
         await tx.requestSourceConfig.deleteMany();
@@ -246,6 +256,11 @@ router.post('/import', async (req, res) => {
           await tx.sMEAssignment.createMany({ data: data.smeAssignments });
         if (data.workRequests?.length)
           await tx.workRequest.createMany({ data: data.workRequests });
+        // CapacityChange FKs to TeamMember, so it must follow the member insert.
+        if (data.capacityChanges?.length)
+          await tx.capacityChange.createMany({ data: data.capacityChanges });
+        if (data.holidays?.length)
+          await tx.holiday.createMany({ data: data.holidays });
 
         // Config tables
         if (data.allocationTypes?.length)

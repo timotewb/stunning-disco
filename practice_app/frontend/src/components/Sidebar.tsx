@@ -7,6 +7,7 @@ import {
   CalendarRange,
   Inbox,
   BarChart3,
+  Gauge,
   NotebookPen,
   Settings,
   ChevronRight,
@@ -20,6 +21,7 @@ const navItems = [
   { to: '/timeline', icon: CalendarRange, label: 'Timeline' },
   { to: '/requests', icon: Inbox, label: 'Requests' },
   { to: '/capabilities', icon: BarChart3, label: 'Capabilities' },
+  { to: '/capacity', icon: Gauge, label: 'Capacity' },
   { to: '/notes', icon: NotebookPen, label: 'Notes' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];

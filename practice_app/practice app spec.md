@@ -331,6 +331,65 @@ Integration ███
 
 ---
 
+9.1 Capacity Over Time
+
+Answers two questions: what capacity does the team have, and how much is
+already committed against it.
+
+Capacity is measured in FTE, where 1.0 is full time. Hours are a display
+convenience only, derived from a configurable hours-per-FTE value.
+
+Inputs:
+
+- baselineFte — a member's standing FTE
+- startDate / endDate — bounds when a member counts toward capacity
+- CapacityChange — a dated override of baselineFte
+- leave — allocations whose type is marked "reduces capacity"
+- allocationFte — the share of a person's capacity an allocation consumes
+- public holidays
+
+Capacity changes:
+
+A change has an effectiveFrom and an optional effectiveTo. Leaving
+effectiveTo blank makes the change permanent. Setting it makes the change
+temporary — capacity reverts automatically afterwards, so a fixed-term
+reduction is a single record rather than a pair of step changes.
+
+Where several changes overlap a day, the one with the latest effectiveFrom
+wins. This lets a short-term reduction sit inside a longer-term one and
+unwind correctly.
+
+Public holidays:
+
+Holidays are working days with zero capacity, not excluded days. Excluding
+them would shrink the working week and hide the dip entirely. Committed work
+is zeroed on holidays too, otherwise every holiday week would manufacture
+phantom overcommitment.
+
+Seeded with New Zealand national holidays. Regional anniversary days and
+company closedowns are added by the user.
+
+Derived figures, per bucket:
+
+capacity   sum of effective FTE across working days
+leave      capacity consumed by leave allocations
+available  capacity − leave
+committed  demand from allocations, excluding leave
+headroom   available − committed
+
+Buckets are weekly or monthly and are clipped to the requested range, so a
+part-week at either edge averages only over the days actually requested.
+
+Views:
+
+- totals for today
+- a chart of available capacity against committed work
+- grouping by role, seniority, or tag
+- a breakdown table
+- warnings for overcommitted periods and for leavers with no end date
+
+---
+
 10. Exporting Visuals
 
 Export formats:
@@ -357,6 +416,7 @@ Team
 Matrices
 Timeline
 Capabilities
+Capacity
 Settings
 
 ---
@@ -459,7 +519,25 @@ TeamMember
 - role
 - seniority
 - notes
+- baselineFte
+- startDate
+- endDate
 - createdAt
+
+CapacityChange
+
+- id
+- teamMemberId
+- effectiveFrom
+- effectiveTo (null = permanent)
+- fte
+- reason
+
+Holiday
+
+- id
+- name
+- date
 
 Dimension
 
@@ -496,6 +574,7 @@ Allocation
 - teamMemberId
 - projectName
 - type
+- allocationFte
 - startDate
 - endDate
 - notes
@@ -515,6 +594,7 @@ Dimension 1‑N DimensionNode
 DimensionNode 1‑N MatrixEntry
 Snapshot 1‑N MatrixEntry
 TeamMember 1‑N Allocation
+TeamMember 1‑N CapacityChange
 DimensionNode 1‑N SMEAssignment
 
 ---
@@ -572,6 +652,24 @@ SME
 GET /sme
 POST /sme
 DELETE /sme/{id}
+
+Capacity
+
+GET /capacity?from=&to=&bucket=&groupBy=
+GET /capacity/config
+PUT /capacity/config
+GET /capacity/undated-leavers
+GET /capacity/changes/{memberId}
+POST /capacity/changes
+PUT /capacity/changes/{id}
+DELETE /capacity/changes/{id}
+
+Holidays
+
+GET /holidays
+POST /holidays
+PUT /holidays/{id}
+DELETE /holidays/{id}
 
 Export
 
@@ -699,7 +797,6 @@ Backup by copying the SQLite file.
 scenario planning
 skill gap analysis
 organisation chart
-capacity planning
 hiring forecast
 
 ---
