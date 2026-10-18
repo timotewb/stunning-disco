@@ -26,6 +26,11 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# The lib/ rule above is a Python packaging artifact rule, but it also
+# silently swallows TypeScript source directories. practice_app is a Node
+# project, so re-include its source lib/ folders.
+!practice_app/**/src/lib/
+
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
