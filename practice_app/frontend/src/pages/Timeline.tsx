@@ -358,10 +358,10 @@ const Timeline: React.FC = () => {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
-            <h3 className="text-lg font-bold mb-6">{editingId ? 'Edit Allocation' : 'Add Allocation'}</h3>
-            <div className="space-y-4">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-full flex flex-col">
+            <h3 className="text-lg font-bold px-8 pt-8 pb-6 shrink-0">{editingId ? 'Edit Allocation' : 'Add Allocation'}</h3>
+            <div className="space-y-4 flex-1 overflow-y-auto px-8 pb-2">
               <Field label="Team Member">
                 <select
                   value={form.assigneeId}
@@ -435,7 +435,7 @@ const Timeline: React.FC = () => {
                 />
               </Field>
             </div>
-            <div className="flex justify-between mt-6">
+            <div className="flex justify-between items-center px-8 py-5 shrink-0 border-t border-gray-100">
               <div>
                 {editingId && (
                   deleteConfirm === editingId ? (
