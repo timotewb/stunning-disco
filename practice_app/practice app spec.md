@@ -390,6 +390,85 @@ Views:
 
 ---
 
+9.2 Demand Planning
+
+Answers the forward question: what will the pipeline ask of the team, and
+when does that ask overtake what the team can actually deliver.
+
+Capacity planning (9.1) only sees work that is already allocated to a named
+person. Work that is merely anticipated has nobody attached to it, so it
+contributes nothing — which is precisely the work that causes future
+pressure. Demand planning fills that gap.
+
+Model:
+
+    Initiative -> Project -> RoleDemand
+
+- Initiative — a programme of work, with a confidence of candidate,
+  probable, or committed
+- Project — a deliverable within an initiative
+- RoleDemand — "this much of this role, for this window"
+
+Role demand attaches to projects only, never directly to initiatives, so
+there is exactly one place to look for any given number. An initiative with
+a single same-named project covers the case where that distinction does not
+matter.
+
+Two different kinds of FTE:
+
+RoleDemand.fte is absolute — 2.0 means two full-time people. An allocation's
+allocationFte is a fraction of one named person's capacity, so a 0.6 FTE
+member fully allocated contributes 0.6. The two are different quantities and
+are computed separately.
+
+Roles are free text:
+
+Forward planning includes roles the team does not employ yet. Demand of
+3.0 FTE for a role with zero capacity is the hiring signal the view exists
+to surface, so the field is never constrained to the current team. Existing
+roles are offered as autocomplete suggestions.
+
+Confidence filters, it never weights:
+
+Confidence selects which initiatives are shown. It does not scale their FTE.
+A blended "we need 1.4 engineers" is not actionable, and the arithmetic
+hides which initiative drove the number.
+
+Staffing a demand:
+
+Setting fulfilledByRequestId links a demand to a real, allocated work
+request. The engine then counts that person's allocation and skips the
+demand, so the original plan stays visible without being counted twice.
+Linking a request that is not actually allocated is rejected, because the
+demand would silently vanish from the forecast with nothing replacing it.
+
+Holidays:
+
+Planned demand is zeroed on holidays and excluded at weekends, exactly as
+capacity is. Dipping only one side of the comparison would invent pressure
+in every holiday week.
+
+Derived figures, per bucket:
+
+planned    unstaffed demand from the pipeline, in absolute FTE
+total ask  committed + planned
+headroom   available - committed - planned
+
+A bucket is "under pressure" when the total ask exceeds available capacity.
+
+View:
+
+A Planning mode on the Capacity page, not a separate page — the comparison
+is only meaningful against the capacity figures already shown there. The
+chart stacks committed work at the base with each initiative above it, and
+overlays a single line for available capacity. Where the stack crosses the
+line is a pressure point.
+
+Planning mode fixes grouping to the whole team, since the point is one ask
+against one capacity line; a role filter narrows the picture instead.
+
+---
+
 10. Exporting Visuals
 
 Export formats:
@@ -539,6 +618,37 @@ Holiday
 - name
 - date
 
+Initiative
+
+- id
+- name
+- description
+- confidence (candidate | probable | committed)
+- color
+- orderIndex
+
+Project
+
+- id
+- initiativeId
+- name
+- notes
+- startDate (optional)
+- endDate (optional)
+- orderIndex
+
+RoleDemand
+
+- id
+- projectId
+- role (free text)
+- seniority (optional)
+- fte (absolute, not a fraction of a person)
+- startDate
+- endDate
+- notes
+- fulfilledByRequestId (optional; when set, the engine skips this row)
+
 Dimension
 
 - id
@@ -596,6 +706,9 @@ Snapshot 1‑N MatrixEntry
 TeamMember 1‑N Allocation
 TeamMember 1‑N CapacityChange
 DimensionNode 1‑N SMEAssignment
+Initiative 1‑N Project
+Project 1‑N RoleDemand
+WorkRequest 1‑N RoleDemand (fulfilment link)
 
 ---
 
@@ -655,7 +768,7 @@ DELETE /sme/{id}
 
 Capacity
 
-GET /capacity?from=&to=&bucket=&groupBy=
+GET /capacity?from=&to=&bucket=&groupBy=&confidence=&role=
 GET /capacity/config
 PUT /capacity/config
 GET /capacity/undated-leavers
@@ -663,6 +776,20 @@ GET /capacity/changes/{memberId}
 POST /capacity/changes
 PUT /capacity/changes/{id}
 DELETE /capacity/changes/{id}
+
+Initiatives, projects and role demand
+
+GET /initiatives
+POST /initiatives
+PUT /initiatives/{id}
+DELETE /initiatives/{id}
+POST /initiatives/projects
+PUT /initiatives/projects/{id}
+DELETE /initiatives/projects/{id}
+POST /initiatives/demands
+PUT /initiatives/demands/{id}
+DELETE /initiatives/demands/{id}
+GET /initiatives/roles
 
 Holidays
 

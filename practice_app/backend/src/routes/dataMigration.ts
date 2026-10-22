@@ -83,6 +83,9 @@ router.get('/export', async (_req, res) => {
       requestEffortConfigs,
       capacityChanges,
       holidays,
+      initiatives,
+      projects,
+      roleDemands,
     ] = await Promise.all([
       prisma.teamMember.findMany({ orderBy: { createdAt: 'asc' } }),
       prisma.dimension.findMany({
@@ -103,6 +106,9 @@ router.get('/export', async (_req, res) => {
       prisma.requestEffortConfig.findMany(),
       prisma.capacityChange.findMany({ orderBy: { effectiveFrom: 'asc' } }),
       prisma.holiday.findMany({ orderBy: { date: 'asc' } }),
+      prisma.initiative.findMany({ orderBy: { orderIndex: 'asc' } }),
+      prisma.project.findMany({ orderBy: { orderIndex: 'asc' } }),
+      prisma.roleDemand.findMany({ orderBy: { startDate: 'asc' } }),
     ]);
 
     // Flatten dimension nodes (exported separately to simplify import ordering)
@@ -148,6 +154,9 @@ router.get('/export', async (_req, res) => {
         requestEffortConfigs: requestEffortConfigs.length,
         capacityChanges: capacityChanges.length,
         holidays: holidays.length,
+        initiatives: initiatives.length,
+        projects: projects.length,
+        roleDemands: roleDemands.length,
       },
       data: {
         teamMembers,
@@ -167,6 +176,9 @@ router.get('/export', async (_req, res) => {
         requestEffortConfigs,
         capacityChanges,
         holidays,
+        initiatives,
+        projects,
+        roleDemands,
         notes,
         images,
       },
@@ -200,6 +212,9 @@ router.post('/import', async (req, res) => {
 
         await tx.matrixEntry.deleteMany();
         await tx.sMEAssignment.deleteMany();
+        await tx.roleDemand.deleteMany();
+        await tx.project.deleteMany();
+        await tx.initiative.deleteMany();
         await tx.workRequest.deleteMany();
         await tx.capacityChange.deleteMany();
         await tx.dimensionNode.deleteMany();
@@ -261,6 +276,14 @@ router.post('/import', async (req, res) => {
           await tx.capacityChange.createMany({ data: data.capacityChanges });
         if (data.holidays?.length)
           await tx.holiday.createMany({ data: data.holidays });
+        // Initiative > Project > RoleDemand, in FK order. RoleDemand may also
+        // reference a WorkRequest, which is already inserted by this point.
+        if (data.initiatives?.length)
+          await tx.initiative.createMany({ data: data.initiatives });
+        if (data.projects?.length)
+          await tx.project.createMany({ data: data.projects });
+        if (data.roleDemands?.length)
+          await tx.roleDemand.createMany({ data: data.roleDemands });
 
         // Config tables
         if (data.allocationTypes?.length)

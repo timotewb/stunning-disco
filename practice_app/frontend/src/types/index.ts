@@ -49,7 +49,18 @@ export interface CapacitySeries {
   leave: number[];
   available: number[];
   demand: number[];
+  /** Unstaffed demand from the initiative pipeline, in absolute FTE. */
+  planned: number[];
   overcommitted: boolean[];
+  overcommittedWithPlanned: boolean[];
+}
+
+export interface PlannedBreakdown {
+  initiativeId: string;
+  initiativeName: string;
+  confidence: Confidence;
+  color: string;
+  planned: number[];
 }
 
 export interface CapacityReduction {
@@ -63,15 +74,65 @@ export interface CapacityReduction {
 export interface CapacityResponse {
   buckets: CapacityBucket[];
   series: CapacitySeries[];
+  plannedBreakdown: PlannedBreakdown[];
   reductions: CapacityReduction[];
   totals: {
     capacityFteNow: number;
     availableFteNow: number;
     demandFteNow: number;
+    plannedFteNow: number;
     headroomFteNow: number;
+    headroomWithPlannedFteNow: number;
     overcommittedBuckets: number;
+    pressureBuckets: number;
   };
   hoursPerFte: number;
+}
+
+// ── Demand planning ──────────────────────────────────────────────────────────
+
+export const CONFIDENCE_LEVELS = ['committed', 'probable', 'candidate'] as const;
+export type Confidence = (typeof CONFIDENCE_LEVELS)[number];
+
+/**
+ * An unstaffed ask. `fte` is ABSOLUTE (2.0 = two full-time people), unlike
+ * WorkRequest.allocationFte which is a fraction of one person's capacity.
+ *
+ * `role` is free text on purpose: demand for a role the team does not employ
+ * yet is the hiring signal this view exists to surface.
+ */
+export interface RoleDemand {
+  id: string;
+  projectId: string;
+  role: string;
+  seniority: string | null;
+  fte: number;
+  startDate: string;
+  endDate: string;
+  notes: string | null;
+  /** When set, a real person covers this ask and the engine skips the row. */
+  fulfilledByRequestId: string | null;
+}
+
+export interface InitiativeProject {
+  id: string;
+  initiativeId: string;
+  name: string;
+  notes: string;
+  startDate: string | null;
+  endDate: string | null;
+  orderIndex: number;
+  roleDemands: RoleDemand[];
+}
+
+export interface Initiative {
+  id: string;
+  name: string;
+  description: string;
+  confidence: Confidence;
+  color: string;
+  orderIndex: number;
+  projects: InitiativeProject[];
 }
 
 export interface Dimension {

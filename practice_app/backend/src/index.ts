@@ -17,6 +17,7 @@ import contactsRouter from './routes/contacts';
 import dataMigrationRouter from './routes/dataMigration';
 import holidaysRouter from './routes/holidays';
 import capacityRouter from './routes/capacity';
+import initiativesRouter from './routes/initiatives';
 import {
   requestSourceConfigRouter,
   requestTypeConfigRouter,
@@ -60,6 +61,7 @@ app.use('/api/contacts', contactsRouter);
 app.use('/api/data-migration', dataMigrationRouter);
 app.use('/api/holidays', holidaysRouter);
 app.use('/api/capacity', capacityRouter);
+app.use('/api/initiatives', initiativesRouter);
 app.use('/api/request-source-config', requestSourceConfigRouter);
 app.use('/api/request-type-config', requestTypeConfigRouter);
 app.use('/api/request-priority-config', requestPriorityConfigRouter);

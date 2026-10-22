@@ -41,6 +41,41 @@ export interface AllocationInput {
   allocationFte: number;
 }
 
+/**
+ * An unstaffed, role-shaped ask from the forward pipeline.
+ *
+ * `fte` is ABSOLUTE — 2.0 means two full-time people — unlike
+ * `AllocationInput.allocationFte`, which is a fraction of one named person's
+ * capacity. The two are different quantities and must not share a code path.
+ *
+ * A demand with `fulfilledByRequestId` set has been staffed by a real person,
+ * whose allocation is already counted as committed demand. The engine skips
+ * those rows so the plan stays visible without being double-counted.
+ */
+export interface RoleDemandInput {
+  id: string;
+  role: string;
+  seniority: string | null;
+  fte: number;
+  startDate: Date;
+  endDate: Date;
+  fulfilledByRequestId: string | null;
+  projectName: string;
+  initiativeId: string;
+  initiativeName: string;
+  confidence: string;
+  color: string;
+}
+
+/** Per-initiative planned demand, so a spike can be traced to its cause. */
+export interface PlannedBreakdown {
+  initiativeId: string;
+  initiativeName: string;
+  confidence: string;
+  color: string;
+  planned: number[];
+}
+
 export type Bucket = 'week' | 'month';
 export type GroupBy = 'none' | 'role' | 'seniority' | 'tag';
 
@@ -56,7 +91,11 @@ export interface Series {
   leave: number[];
   available: number[];
   demand: number[];
+  /** Unstaffed demand from the pipeline, in absolute FTE. */
+  planned: number[];
   overcommitted: boolean[];
+  /** Overcommitted once planned demand is included as well as committed. */
+  overcommittedWithPlanned: boolean[];
 }
 
 export interface ReductionNote {
@@ -70,13 +109,19 @@ export interface ReductionNote {
 export interface CapacityResult {
   buckets: BucketMeta[];
   series: Series[];
+  plannedBreakdown: PlannedBreakdown[];
   reductions: ReductionNote[];
   totals: {
     capacityFteNow: number;
     availableFteNow: number;
     demandFteNow: number;
+    plannedFteNow: number;
     headroomFteNow: number;
+    /** Headroom once planned demand is included — the forward-planning number. */
+    headroomWithPlannedFteNow: number;
     overcommittedBuckets: number;
+    /** Buckets where committed + planned demand exceeds available capacity. */
+    pressureBuckets: number;
   };
 }
 
@@ -237,6 +282,8 @@ export interface ComputeArgs {
   leaveTypes: Set<string>;
   /** YYYY-MM-DD keys of public holidays. */
   holidays: Set<string>;
+  /** Unstaffed pipeline demand. Already filtered by confidence at the API layer. */
+  roleDemands?: RoleDemandInput[];
   from: Date;
   to: Date;
   bucket: Bucket;
@@ -248,6 +295,22 @@ export interface ComputeArgs {
 export function computeCapacity(args: ComputeArgs): CapacityResult {
   const { members, allocations, leaveTypes, holidays, from, to, bucket, groupBy } = args;
   const buckets = buildBuckets(utcDay(from), utcDay(to), bucket);
+
+  // Linked demands are already represented by the assignee's allocation; see
+  // RoleDemandInput. Counting both would double the ask.
+  const roleDemands = (args.roleDemands ?? []).filter((d) => !d.fulfilledByRequestId);
+
+  // Member role casing wins, so "data engineer" typed into a demand lands in
+  // the same band as the team's "Data Engineer" rather than splitting it.
+  const canonicalRole = new Map<string, string>();
+  for (const m of members) {
+    const role = m.role?.trim();
+    if (role) canonicalRole.set(role.toLowerCase(), role);
+  }
+  for (const d of roleDemands) {
+    const role = d.role.trim();
+    if (role && !canonicalRole.has(role.toLowerCase())) canonicalRole.set(role.toLowerCase(), role);
+  }
 
   // Allocations indexed by assignee so the per-day loop stays proportional to
   // that member's own allocations rather than the whole table.
@@ -270,7 +333,9 @@ export function computeCapacity(args: ComputeArgs): CapacityResult {
         leave: new Array(buckets.length).fill(0),
         available: new Array(buckets.length).fill(0),
         demand: new Array(buckets.length).fill(0),
+        planned: new Array(buckets.length).fill(0),
         overcommitted: new Array(buckets.length).fill(false),
+        overcommittedWithPlanned: new Array(buckets.length).fill(false),
       };
       seriesByKey.set(key, s);
       keys.push(key);
@@ -280,6 +345,36 @@ export function computeCapacity(args: ComputeArgs): CapacityResult {
 
   const reductions: ReductionNote[] = [];
   const seenReduction = new Set<string>();
+
+  const breakdownByInitiative = new Map<string, PlannedBreakdown>();
+  const ensureBreakdown = (d: RoleDemandInput): PlannedBreakdown => {
+    let b = breakdownByInitiative.get(d.initiativeId);
+    if (!b) {
+      b = {
+        initiativeId: d.initiativeId,
+        initiativeName: d.initiativeName,
+        confidence: d.confidence,
+        color: d.color,
+        planned: new Array(buckets.length).fill(0),
+      };
+      breakdownByInitiative.set(d.initiativeId, b);
+    }
+    return b;
+  };
+
+  /**
+   * Which series a demand belongs to. Demands carry no tags, so under tag
+   * grouping they fall in with untagged members rather than being dropped —
+   * hiding them would understate the total.
+   */
+  const demandGroupKey = (d: RoleDemandInput): string => {
+    switch (groupBy) {
+      case 'role': return canonicalRole.get(d.role.trim().toLowerCase()) || d.role.trim() || 'Unassigned';
+      case 'seniority': return d.seniority?.trim() || 'Unassigned';
+      case 'tag': return 'Untagged';
+      default: return 'All';
+    }
+  };
 
   buckets.forEach((b, bi) => {
     const workingDays = b.days.length;
@@ -340,6 +435,24 @@ export function computeCapacity(args: ComputeArgs): CapacityResult {
         s.demand[bi] += demandAvg;
       }
     }
+
+    // Planned demand. Absolute FTE, so it is summed directly rather than being
+    // scaled by anyone's capacity — nobody is assigned to it yet.
+    for (const d of roleDemands) {
+      let plannedSum = 0;
+      for (const day of b.days) {
+        // Zeroed on holidays exactly as capacity is. Zeroing only one side of
+        // the comparison would invent pressure in every holiday week.
+        if (holidays.has(dateKey(day))) continue;
+        if (!withinRange(day, d.startDate, d.endDate)) continue;
+        plannedSum += d.fte;
+      }
+      if (plannedSum === 0) continue;
+
+      const plannedAvg = plannedSum / workingDays;
+      ensureSeries(demandGroupKey(d)).planned[bi] += plannedAvg;
+      ensureBreakdown(d).planned[bi] += plannedAvg;
+    }
   });
 
   const round = (n: number) => Math.round(n * 100) / 100;
@@ -349,15 +462,23 @@ export function computeCapacity(args: ComputeArgs): CapacityResult {
       s.leave[i] = round(s.leave[i]);
       s.available[i] = round(s.available[i]);
       s.demand[i] = round(s.demand[i]);
+      s.planned[i] = round(s.planned[i]);
       s.overcommitted[i] = s.demand[i] > s.available[i] + 1e-9;
+      s.overcommittedWithPlanned[i] = s.demand[i] + s.planned[i] > s.available[i] + 1e-9;
     }
+  }
+  for (const b of breakdownByInitiative.values()) {
+    for (let i = 0; i < buckets.length; i++) b.planned[i] = round(b.planned[i]);
   }
 
   // Counted once per bucket rather than once per series, so a tag-grouped view
   // doesn't inflate the figure through members belonging to two groups.
   let overcommittedBuckets = 0;
+  let pressureBuckets = 0;
   for (let i = 0; i < buckets.length; i++) {
-    if ([...seriesByKey.values()].some((s) => s.overcommitted[i])) overcommittedBuckets++;
+    const all = [...seriesByKey.values()];
+    if (all.some((s) => s.overcommitted[i])) overcommittedBuckets++;
+    if (all.some((s) => s.overcommittedWithPlanned[i])) pressureBuckets++;
   }
 
   const today = utcDay(args.today ?? new Date());
@@ -370,17 +491,24 @@ export function computeCapacity(args: ComputeArgs): CapacityResult {
   const capacityFteNow = sumAt((s) => s.capacity);
   const availableFteNow = sumAt((s) => s.available);
   const demandFteNow = sumAt((s) => s.demand);
+  const plannedFteNow = sumAt((s) => s.planned);
 
   return {
     buckets: buckets.map((b) => b.meta),
     series: keys.sort((a, b) => a.localeCompare(b)).map((k) => seriesByKey.get(k)!),
+    plannedBreakdown: [...breakdownByInitiative.values()].sort((a, b) =>
+      a.initiativeName.localeCompare(b.initiativeName)
+    ),
     reductions,
     totals: {
       capacityFteNow,
       availableFteNow,
       demandFteNow,
+      plannedFteNow,
       headroomFteNow: round(availableFteNow - demandFteNow),
+      headroomWithPlannedFteNow: round(availableFteNow - demandFteNow - plannedFteNow),
       overcommittedBuckets,
+      pressureBuckets,
     },
   };
 }

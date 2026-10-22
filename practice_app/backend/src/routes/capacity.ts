@@ -25,6 +25,7 @@ import {
   type GroupBy,
   type MemberInput,
 } from '../lib/capacity';
+import { CONFIDENCE_LEVELS } from './initiatives';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -218,7 +219,20 @@ router.get('/', async (req: Request, res: Response) => {
       ? (rawGroup as GroupBy)
       : 'none';
 
-    const [members, allocations, types, holidays] = await Promise.all([
+    // Confidence filter. Absent means "everything"; an explicit empty value
+    // means the user deselected every level, which must show no planned demand
+    // rather than silently reverting to all of it.
+    const rawConfidence = req.query.confidence;
+    const confidences =
+      rawConfidence === undefined
+        ? null
+        : String(rawConfidence)
+            .split(',')
+            .map((c) => c.trim())
+            .filter((c) => CONFIDENCE_LEVELS.includes(c as any));
+    const roleFilter = String(req.query.role ?? '').trim().toLowerCase();
+
+    const [members, allocations, types, holidays, demands] = await Promise.all([
       prisma.teamMember.findMany({
         include: { capacityChanges: true },
         orderBy: { name: 'asc' },
@@ -233,6 +247,14 @@ router.get('/', async (req: Request, res: Response) => {
       }),
       prisma.allocationTypeConfig.findMany(),
       prisma.holiday.findMany({ where: { date: { gte: fromDate, lte: toDate } } }),
+      prisma.roleDemand.findMany({
+        where: {
+          startDate: { lte: toDate },
+          endDate: { gte: fromDate },
+          ...(confidences ? { project: { initiative: { confidence: { in: confidences } } } } : {}),
+        },
+        include: { project: { include: { initiative: true } } },
+      }),
     ]);
 
     const memberInputs: MemberInput[] = members.map((m) => ({
@@ -266,6 +288,22 @@ router.get('/', async (req: Request, res: Response) => {
       })),
       leaveTypes: new Set(types.filter((t) => t.reducesCapacity).map((t) => t.name)),
       holidays: new Set(holidays.map((h) => dateKey(h.date))),
+      roleDemands: demands
+        .filter((d) => !roleFilter || d.role.trim().toLowerCase() === roleFilter)
+        .map((d) => ({
+          id: d.id,
+          role: d.role,
+          seniority: d.seniority,
+          fte: d.fte,
+          startDate: d.startDate,
+          endDate: d.endDate,
+          fulfilledByRequestId: d.fulfilledByRequestId,
+          projectName: d.project.name,
+          initiativeId: d.project.initiativeId,
+          initiativeName: d.project.initiative.name,
+          confidence: d.project.initiative.confidence,
+          color: d.project.initiative.color,
+        })),
       from: fromDate,
       to: toDate,
       bucket,

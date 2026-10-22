@@ -28,6 +28,9 @@ import type {
   ScannerConfig,
   CapacityChange,
   CapacityResponse,
+  Initiative,
+  InitiativeProject,
+  RoleDemand,
   Holiday,
 } from '../types';
 
@@ -368,6 +371,9 @@ export const getCapacity = (params: {
   to: string;
   bucket?: 'week' | 'month';
   groupBy?: 'none' | 'role' | 'seniority' | 'tag';
+  /** Comma-separated confidence levels. Omit for all. */
+  confidence?: string;
+  role?: string;
 }) => api.get<CapacityResponse>('/capacity', { params }).then((r) => r.data);
 
 export const getCapacityConfig = () =>
@@ -391,6 +397,38 @@ export const updateCapacityChange = (id: string, data: Partial<CapacityChange>) 
 
 export const deleteCapacityChange = (id: string) =>
   api.delete(`/capacity/changes/${id}`);
+
+// ── Initiatives, projects and role demand ─────────────────────────────────────
+export const getInitiatives = () =>
+  api.get<Initiative[]>('/initiatives').then((r) => r.data);
+
+export const createInitiative = (data: Partial<Initiative>) =>
+  api.post<Initiative>('/initiatives', data).then((r) => r.data);
+
+export const updateInitiative = (id: string, data: Partial<Initiative>) =>
+  api.put<Initiative>(`/initiatives/${id}`, data).then((r) => r.data);
+
+export const deleteInitiative = (id: string) => api.delete(`/initiatives/${id}`);
+
+export const createProject = (data: Partial<InitiativeProject>) =>
+  api.post<InitiativeProject>('/initiatives/projects', data).then((r) => r.data);
+
+export const updateProject = (id: string, data: Partial<InitiativeProject>) =>
+  api.put<InitiativeProject>(`/initiatives/projects/${id}`, data).then((r) => r.data);
+
+export const deleteProject = (id: string) => api.delete(`/initiatives/projects/${id}`);
+
+export const createRoleDemand = (data: Partial<RoleDemand>) =>
+  api.post<RoleDemand>('/initiatives/demands', data).then((r) => r.data);
+
+export const updateRoleDemand = (id: string, data: Partial<RoleDemand>) =>
+  api.put<RoleDemand>(`/initiatives/demands/${id}`, data).then((r) => r.data);
+
+export const deleteRoleDemand = (id: string) => api.delete(`/initiatives/demands/${id}`);
+
+/** Roles already in use, for autocomplete. New roles are still allowed. */
+export const getDemandRoles = () =>
+  api.get<string[]>('/initiatives/roles').then((r) => r.data);
 
 // ── Holidays ──────────────────────────────────────────────────────────────────
 export const getHolidays = (params?: { from?: string; to?: string }) =>

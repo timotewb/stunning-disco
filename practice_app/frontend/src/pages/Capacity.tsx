@@ -5,14 +5,26 @@ import {
 } from 'recharts';
 import { AlertTriangle, TrendingDown, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import type { CapacityResponse, TeamMember } from '../types';
+import type { CapacityResponse, Confidence, TeamMember } from '../types';
+import { CONFIDENCE_LEVELS } from '../types';
 import { getCapacity, getUndatedLeavers } from '../api/client';
+import InitiativePlanner from '../components/InitiativePlanner';
 
 const COLORS = {
   available: '#6366f1',
   leave: '#f59e0b',
   demand: '#f43f5e',
   series: ['#6366f1', '#14b8a6', '#a855f7', '#f97316', '#06b6d4', '#ec4899', '#22c55e', '#3b82f6'],
+  committed: '#64748b',
+  capacityLine: '#0f172a',
+};
+
+type Mode = 'committed' | 'planning';
+
+const CONFIDENCE_LABELS: Record<Confidence, string> = {
+  committed: 'Committed',
+  probable: 'Probable',
+  candidate: 'Candidate',
 };
 
 type Bucket = 'week' | 'month';
@@ -37,6 +49,10 @@ function defaultRange(): { from: string; to: string } {
   return { from: isoDate(from), to: isoDate(to) };
 }
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function fmtFte(n: number, hoursPerFte: number, showHours: boolean): string {
   return showHours ? `${(n * hoursPerFte).toFixed(1)} h` : `${n.toFixed(2)} FTE`;
 }
@@ -47,6 +63,10 @@ const Capacity: React.FC = () => {
   const [to, setTo] = useState(initial.to);
   const [bucket, setBucket] = useState<Bucket>('month');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
+  const [mode, setMode] = useState<Mode>('committed');
+  const [confidence, setConfidence] = useState<Confidence[]>([...CONFIDENCE_LEVELS]);
+  const [roleFilter, setRoleFilter] = useState('');
+  const [plannerOpen, setPlannerOpen] = useState(false);
   const [showHours, setShowHours] = useState(false);
 
   const [data, setData] = useState<CapacityResponse | null>(null);
@@ -60,7 +80,19 @@ const Capacity: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      setData(await getCapacity({ from, to, bucket, groupBy }));
+      // Planning compares one team-wide ask against one capacity line, so it
+      // forces whole-team grouping; a role filter narrows it instead.
+      setData(
+        await getCapacity({
+          from,
+          to,
+          bucket,
+          groupBy: mode === 'planning' ? 'none' : groupBy,
+          ...(mode === 'planning'
+            ? { confidence: confidence.join(','), ...(roleFilter ? { role: roleFilter } : {}) }
+            : {}),
+        })
+      );
     } catch (e) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(msg || 'Failed to load capacity.');
@@ -68,7 +100,7 @@ const Capacity: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [from, to, bucket, groupBy]);
+  }, [from, to, bucket, groupBy, mode, confidence, roleFilter]);
 
   useEffect(() => {
     load();
@@ -81,7 +113,8 @@ const Capacity: React.FC = () => {
   }, []);
 
   const hoursPerFte = data?.hoursPerFte ?? 37.5;
-  const grouped = groupBy !== 'none';
+  const planning = mode === 'planning';
+  const grouped = !planning && groupBy !== 'none';
 
   // Recharts wants one row per bucket with every series flattened onto it.
   const chartData = useMemo(() => {
@@ -94,9 +127,24 @@ const Capacity: React.FC = () => {
         row[`demand__${s.key}`] = s.demand[i];
         row[`over__${s.key}`] = s.overcommitted[i];
       }
+      if (planning) {
+        // Planning forces groupBy=none, so summing series cannot double-count
+        // a member who belongs to two groups.
+        const committed = data.series.reduce((acc, s) => acc + s.demand[i], 0);
+        const available = data.series.reduce((acc, s) => acc + s.available[i], 0);
+        let ask = committed;
+        row.committed = round2(committed);
+        row.available = round2(available);
+        for (const b of data.plannedBreakdown) {
+          row[`init__${b.initiativeId}`] = b.planned[i];
+          ask += b.planned[i];
+        }
+        row.totalAsk = round2(ask);
+        row.gap = round2(available - ask);
+      }
       return row;
     });
-  }, [data]);
+  }, [data, planning]);
 
   const reductionsByBucket = useMemo(() => {
     const map = new Map<number, CapacityResponse['reductions']>();
@@ -112,11 +160,41 @@ const Capacity: React.FC = () => {
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Capacity</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          What the team can deliver over time, and how much is already committed.
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Capacity</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {planning
+              ? 'What the pipeline will ask of the team, against what the team can actually deliver.'
+              : 'What the team can deliver over time, and how much is already committed.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+            {([
+              ['committed', 'Committed'],
+              ['planning', 'Planning'],
+            ] as [Mode, string][]).map(([m, label]) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`px-4 py-2 text-sm font-medium ${
+                  mode === m ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {planning && (
+            <button
+              onClick={() => setPlannerOpen(true)}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800"
+            >
+              Manage pipeline
+            </button>
+          )}
+        </div>
       </div>
 
       {leavers.length > 0 && !dismissedLeavers && (
@@ -182,20 +260,58 @@ const Capacity: React.FC = () => {
             ))}
           </div>
         </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Group by</label>
-          <select
-            value={groupBy}
-            onChange={(e) => setGroupBy(e.target.value as GroupBy)}
-            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-          >
-            {(Object.keys(GROUP_LABELS) as GroupBy[]).map((g) => (
-              <option key={g} value={g}>
-                {GROUP_LABELS[g]}
-              </option>
-            ))}
-          </select>
-        </div>
+        {planning ? (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Confidence</label>
+              <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+                {CONFIDENCE_LEVELS.map((c) => {
+                  const on = confidence.includes(c);
+                  return (
+                    <button
+                      key={c}
+                      onClick={() =>
+                        setConfidence((prev) =>
+                          prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]
+                        )
+                      }
+                      className={`px-3 py-1.5 text-sm ${
+                        on ? 'bg-indigo-600 text-white' : 'bg-white text-gray-400 hover:bg-gray-50'
+                      }`}
+                    >
+                      {CONFIDENCE_LABELS[c]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Role</label>
+              <input
+                type="text"
+                value={roleFilter}
+                placeholder="All roles"
+                onChange={(e) => setRoleFilter(e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              />
+            </div>
+          </>
+        ) : (
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Group by</label>
+            <select
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            >
+              {(Object.keys(GROUP_LABELS) as GroupBy[]).map((g) => (
+                <option key={g} value={g}>
+                  {GROUP_LABELS[g]}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="ml-auto">
           <label className="block text-xs font-medium text-gray-600 mb-1">Units</label>
           <div className="flex rounded-lg border border-gray-200 overflow-hidden">
@@ -226,7 +342,37 @@ const Capacity: React.FC = () => {
       )}
 
       {/* ── Summary tiles ─────────────────────────────────────────────────── */}
-      {totals && (
+      {totals && planning && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+          <Tile
+            label="Available today"
+            value={fmtFte(totals.availableFteNow, hoursPerFte, showHours)}
+            hint="Capacity after leave"
+          />
+          <Tile
+            label="Committed today"
+            value={fmtFte(totals.demandFteNow, hoursPerFte, showHours)}
+            hint="Work already allocated to people"
+          />
+          <Tile
+            label="Planned ask today"
+            value={fmtFte(totals.plannedFteNow, hoursPerFte, showHours)}
+            hint="Unstaffed demand from the pipeline"
+          />
+          <Tile
+            label="Headroom today"
+            value={fmtFte(totals.headroomWithPlannedFteNow, hoursPerFte, showHours)}
+            hint={
+              totals.headroomWithPlannedFteNow < 0
+                ? 'The pipeline already asks for more than the team has'
+                : 'Spare capacity after committed and planned work'
+            }
+            tone={totals.headroomWithPlannedFteNow < 0 ? 'danger' : 'default'}
+          />
+        </div>
+      )}
+
+      {totals && !planning && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
           <Tile
             label="Capacity today"
@@ -256,7 +402,19 @@ const Capacity: React.FC = () => {
         </div>
       )}
 
-      {totals && totals.overcommittedBuckets > 0 && (
+      {totals && planning && totals.pressureBuckets > 0 && (
+        <div className="mb-5 flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-800">
+          <AlertTriangle size={16} className="flex-shrink-0" />
+          <span>
+            <strong>{totals.pressureBuckets}</strong>{' '}
+            {totals.pressureBuckets === 1 ? bucket : `${bucket}s`} in this range are under
+            pressure — committed plus planned work exceeds available capacity. Plan resource
+            ahead of these points.
+          </span>
+        </div>
+      )}
+
+      {totals && !planning && totals.overcommittedBuckets > 0 && (
         <div className="mb-5 flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-800">
           <AlertTriangle size={16} className="flex-shrink-0" />
           <span>
@@ -301,20 +459,56 @@ const Capacity: React.FC = () => {
               />
               <Tooltip
                 content={
-                  <CapacityTooltip
-                    series={data.series}
-                    hoursPerFte={hoursPerFte}
-                    showHours={showHours}
-                    grouped={grouped}
-                    reductions={reductionsByBucket}
-                    buckets={data.buckets}
-                  />
+                  planning ? (
+                    <PlanningTooltip
+                      breakdown={data.plannedBreakdown}
+                      hoursPerFte={hoursPerFte}
+                      showHours={showHours}
+                      reductions={reductionsByBucket}
+                      buckets={data.buckets}
+                    />
+                  ) : (
+                    <CapacityTooltip
+                      series={data.series}
+                      hoursPerFte={hoursPerFte}
+                      showHours={showHours}
+                      grouped={grouped}
+                      reductions={reductionsByBucket}
+                      buckets={data.buckets}
+                    />
+                  )
                 }
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <ReferenceLine y={0} stroke="#cbd5e1" />
 
-              {grouped
+              {planning && (
+                <Area
+                  key="committed"
+                  type="linear"
+                  dataKey="committed"
+                  name="Committed work"
+                  stackId="ask"
+                  stroke={COLORS.committed}
+                  fill={COLORS.committed}
+                  fillOpacity={0.35}
+                />
+              )}
+              {planning &&
+                data.plannedBreakdown.map((b, i) => (
+                  <Area
+                    key={b.initiativeId}
+                    type="linear"
+                    dataKey={`init__${b.initiativeId}`}
+                    name={b.initiativeName}
+                    stackId="ask"
+                    stroke={COLORS.series[i % COLORS.series.length]}
+                    fill={COLORS.series[i % COLORS.series.length]}
+                    fillOpacity={b.confidence === 'committed' ? 0.55 : b.confidence === 'probable' ? 0.35 : 0.18}
+                  />
+                ))}
+
+              {planning ? null : grouped
                 ? data.series.map((s, i) => (
                     <Area
                       key={s.key}
@@ -349,7 +543,18 @@ const Capacity: React.FC = () => {
                     />,
                   ]}
 
-              {grouped ? (
+              {planning && (
+                <Line
+                  type="linear"
+                  dataKey="available"
+                  name="Available capacity"
+                  stroke={COLORS.capacityLine}
+                  strokeWidth={2.5}
+                  dot={{ r: 2.5 }}
+                />
+              )}
+
+              {planning ? null : grouped ? (
                 data.series.map((s, i) => (
                   <Line
                     key={`d-${s.key}`}
@@ -377,6 +582,10 @@ const Capacity: React.FC = () => {
         )}
       </div>
 
+      {plannerOpen && (
+        <InitiativePlanner onClose={() => setPlannerOpen(false)} onChanged={load} />
+      )}
+
       {/* ── Breakdown table ───────────────────────────────────────────────── */}
       {data && data.series.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -398,7 +607,52 @@ const Capacity: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {grouped
+                {planning
+                  ? data.series.slice(0, 1).flatMap((s) => [
+                      <Row
+                        key="avail"
+                        label="Available capacity"
+                        values={s.available}
+                        hoursPerFte={hoursPerFte}
+                        showHours={showHours}
+                        bold
+                      />,
+                      <Row
+                        key="committed"
+                        label="Committed work"
+                        values={s.demand}
+                        hoursPerFte={hoursPerFte}
+                        showHours={showHours}
+                      />,
+                      ...data.plannedBreakdown.map((b) => (
+                        <Row
+                          key={b.initiativeId}
+                          label={`  ${b.initiativeName}`}
+                          values={b.planned}
+                          hoursPerFte={hoursPerFte}
+                          showHours={showHours}
+                          muted
+                        />
+                      )),
+                      <Row
+                        key="ask"
+                        label="Total ask"
+                        values={s.demand.map((d, i) => d + s.planned[i])}
+                        over={s.overcommittedWithPlanned}
+                        hoursPerFte={hoursPerFte}
+                        showHours={showHours}
+                      />,
+                      <Row
+                        key="gap"
+                        label="Headroom"
+                        values={s.available.map((a, i) => a - s.demand[i] - s.planned[i])}
+                        over={s.overcommittedWithPlanned}
+                        hoursPerFte={hoursPerFte}
+                        showHours={showHours}
+                        bold
+                      />,
+                    ])
+                  : grouped
                   ? data.series.map((s) => (
                       <React.Fragment key={s.key}>
                         <Row
@@ -523,6 +777,80 @@ const Row: React.FC<{
     ))}
   </tr>
 );
+
+/**
+ * Planning tooltip. Leads with the gap, because the whole point of the view is
+ * spotting where the ask overtakes capacity.
+ */
+const PlanningTooltip = ({
+  active,
+  label,
+  payload,
+  breakdown,
+  hoursPerFte,
+  showHours,
+  reductions,
+  buckets,
+}: {
+  active?: boolean;
+  label?: string;
+  payload?: { payload?: Record<string, number> }[];
+  breakdown: CapacityResponse['plannedBreakdown'];
+  hoursPerFte: number;
+  showHours: boolean;
+  reductions: Map<number, CapacityResponse['reductions']>;
+  buckets: CapacityResponse['buckets'];
+}) => {
+  if (!active || !label) return null;
+  const idx = buckets.findIndex((b) => b.label === label);
+  if (idx < 0) return null;
+  const row = payload?.[0]?.payload;
+  if (!row) return null;
+
+  const gap = row.gap ?? 0;
+  const notes = reductions.get(idx) ?? [];
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs max-w-xs">
+      <p className="font-semibold text-gray-700 mb-1.5">{label}</p>
+      <Stat label="Available capacity" v={row.available ?? 0} h={hoursPerFte} showHours={showHours} />
+      <Stat label="Committed work" v={row.committed ?? 0} h={hoursPerFte} showHours={showHours} />
+      {breakdown.map((b) => {
+        const v = b.planned[idx];
+        if (!v) return null;
+        return (
+          <Stat
+            key={b.initiativeId}
+            label={`${b.initiativeName} (${b.confidence})`}
+            v={v}
+            h={hoursPerFte}
+            showHours={showHours}
+          />
+        );
+      })}
+      <div className="mt-1.5 pt-1.5 border-t border-gray-100">
+        <Stat label="Total ask" v={row.totalAsk ?? 0} h={hoursPerFte} showHours={showHours} />
+        <div
+          className={`flex justify-between gap-4 font-medium ${
+            gap < 0 ? 'text-rose-600' : 'text-emerald-700'
+          }`}
+        >
+          <span>{gap < 0 ? 'Shortfall' : 'Headroom'}</span>
+          <span>{fmtFte(Math.abs(gap), hoursPerFte, showHours)}</span>
+        </div>
+      </div>
+      {notes.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          {notes.map((n, i) => (
+            <p key={i} className="text-amber-700">
+              {n.memberName}: {n.from} → {n.to} FTE ({n.reason})
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const CapacityTooltip = ({
   active,
